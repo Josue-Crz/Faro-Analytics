@@ -1,0 +1,36 @@
+# Dependencies and generated output
+node_modules/
+.pnpm-store/
+.next/
+dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Local runtime state
+.env
+.env.*
+!.env.example
+*.local
+*.log
+.DS_Store
+
+# Database and queue development artifacts
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Credentials and local provider configuration
+config.json
+.bob/mcp.json
+!.bob/mcp.example.json
+credentials*.json
+token*.json
+
+# Editors
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json

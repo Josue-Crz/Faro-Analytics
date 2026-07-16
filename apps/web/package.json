@@ -1,0 +1,38 @@
+{
+  "name": "@faro/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .next"
+  },
+  "dependencies": {
+    "@carbon/charts": "^1.27.16",
+    "@carbon/charts-react": "^1.27.16",
+    "@carbon/icons-react": "^11.74.0",
+    "@carbon/react": "^1.111.1",
+    "@faro/core": "workspace:*",
+    "@faro/database": "workspace:*",
+    "@faro/google-sheets": "workspace:*",
+    "@faro/ibm-bob": "workspace:*",
+    "@faro/mcp": "workspace:*",
+    "@faro/notifications": "workspace:*",
+    "@faro/optimizer": "workspace:*",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/ibm-plex-sans": "^5.2.7",
+    "next": "^16.2.10",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-is": "^19.2.7",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "sass": "^1.101.0",
+    "typescript": "^5.9.3"
+  }
+}

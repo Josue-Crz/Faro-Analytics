@@ -1,0 +1,5 @@
+@use '@carbon/react/scss/config' with (
+  $css--font-face: false,
+  $css--body: false
+);
+@use '@carbon/react';

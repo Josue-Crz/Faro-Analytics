@@ -1,0 +1,733 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MANAGER
+  MEMBER
+  VIEWER
+}
+
+enum ContactType {
+  PARTICIPANT
+  SPONSOR
+  PARTNER
+  DONOR
+  SPEAKER
+  VENDOR
+  OTHER
+}
+
+enum ContactChannel {
+  EMAIL
+  PHONE
+  SMS
+  MEETING
+  SOCIAL
+  OTHER
+}
+
+enum ConsentStatus {
+  OPTED_IN
+  IMPLIED
+  UNKNOWN
+  OPTED_OUT
+}
+
+enum OrganizationType {
+  SPONSOR
+  PARTNER
+  NONPROFIT
+  CORPORATION
+  EDUCATION
+  GOVERNMENT
+  VENDOR
+  OTHER
+}
+
+enum CampaignType {
+  SPONSORSHIP
+  PARTICIPANT_OUTREACH
+  PARTNERSHIP
+  FUNDRAISING
+  EVENT
+  COMMUNITY
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum OutreachTone {
+  PROFESSIONAL
+  WARM
+  CONCISE
+  CONSULTATIVE
+  PARTNERSHIP_FOCUSED
+  SPONSORSHIP_FOCUSED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum InteractionDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum DeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  BOUNCED
+  FAILED
+  RECEIVED
+}
+
+enum ResponseClassification {
+  INTERESTED
+  NEEDS_MORE_INFORMATION
+  MEETING_REQUESTED
+  REFERRED
+  FOLLOW_UP_LATER
+  DECLINED
+  OUT_OF_OFFICE
+  UNSUBSCRIBE
+  NO_ACTIONABLE_INTENT
+  AMBIGUOUS
+}
+
+enum Sentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+  MIXED
+}
+
+enum Urgency {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum AnalysisProvenance {
+  HUMAN
+  DEMO_FIXTURE
+  IBM_BOB
+}
+
+enum RecommendationStatus {
+  PROPOSED
+  ACCEPTED
+  EDITED
+  SNOOZED
+  DISMISSED
+}
+
+enum DataSufficiency {
+  HIGH
+  MEDIUM
+  LOW
+  INSUFFICIENT
+}
+
+enum FollowUpStatus {
+  OPEN
+  SNOOZED
+  COMPLETED
+  CANCELLED
+}
+
+enum BobGenerationType {
+  OUTREACH_DRAFT
+  RESPONSE_ANALYSIS
+  RECOMMENDATION_EXPLANATION
+}
+
+enum BobGenerationStatus {
+  AWAITING_BOB
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum DraftProvenance {
+  DEMO_DRAFT
+  IBM_BOB
+}
+
+enum DraftApprovalStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  WEB_PUSH
+  SMS
+}
+
+enum NotificationStatus {
+  SCHEDULED
+  SENT
+  PREVIEWED
+  FAILED
+  CANCELLED
+}
+
+enum SheetSyncDirection {
+  IMPORT
+  BIDIRECTIONAL
+}
+
+enum SheetConnectionStatus {
+  CONNECTED
+  NEEDS_AUTH
+  SYNC_ISSUE
+  DISABLED
+}
+
+enum SheetSyncStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  PARTIAL
+  FAILED
+  DRY_RUN
+}
+
+enum AuditActorType {
+  USER
+  SYSTEM
+  IBM_BOB
+  MCP
+  WORKER
+}
+
+model Workspace {
+  id                String   @id
+  name              String
+  slug              String   @unique
+  defaultTimezone   String
+  quietHoursStart   String
+  quietHoursEnd     String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  memberships        Membership[]
+  organizations      Organization[]
+  sponsorshipStages  SponsorshipPipelineStage[]
+  contacts           Contact[]
+  campaigns          Campaign[]
+  campaignContacts   CampaignContact[]
+  interactions       Interaction[]
+  responses          Response[]
+  recommendations    OutreachRecommendation[]
+  followUpTasks       FollowUpTask[]
+  bobRequests         BobGenerationRequest[]
+  bobDrafts           BobDraft[]
+  notifications       Notification[]
+  sheetConnections    SheetConnection[]
+  sheetFieldMappings  SheetFieldMapping[]
+  sheetSyncRuns       SheetSyncRun[]
+  auditEvents         AuditEvent[]
+}
+
+model User {
+  id                      String   @id
+  name                    String
+  email                   String   @unique
+  timezone                String
+  notificationPreferences Json     @default("{}")
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  memberships              Membership[]
+  contactsOwned            Contact[]              @relation("ContactOwner")
+  campaignsOwned           Campaign[]             @relation("CampaignOwner")
+  campaignContactsAssigned CampaignContact[]      @relation("CampaignContactAssignee")
+  responsesReviewed        Response[]             @relation("ResponseReviewer")
+  followUpsAssigned        FollowUpTask[]          @relation("FollowUpAssignee")
+  bobRequestsRequested     BobGenerationRequest[] @relation("BobRequestor")
+  bobDraftsApproved        BobDraft[]             @relation("BobDraftApprover")
+  notifications            Notification[]
+}
+
+model Membership {
+  workspaceId String
+  userId      String
+  role        WorkspaceRole
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+
+model SponsorshipPipelineStage {
+  id          String   @id
+  workspaceId String
+  name        String
+  position    Int
+  probability Float
+  isTerminal  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  organizations Organization[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, name])
+  @@unique([workspaceId, position])
+}
+
+model Organization {
+  id                   String           @id
+  workspaceId          String
+  sponsorshipStageId   String?
+  name                 String
+  type                 OrganizationType
+  industry             String?
+  website              String?
+  estimatedValue       Int              @default(0)
+  interestAreas        String[]         @default([])
+  tags                 String[]         @default([])
+  customFields         Json             @default("{}")
+  externalId           String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  deletedAt            DateTime?
+
+  workspace        Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sponsorshipStage SponsorshipPipelineStage? @relation(fields: [sponsorshipStageId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  contacts         Contact[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, externalId])
+  @@index([workspaceId, name])
+  @@index([workspaceId, sponsorshipStageId])
+}
+
+model Contact {
+  id               String         @id
+  workspaceId      String
+  organizationId   String?
+  ownerId           String?
+  type              ContactType
+  firstName         String
+  lastName          String
+  email             String?
+  phone             String?
+  title             String?
+  timezone          String
+  preferredChannel  ContactChannel
+  source            String?
+  tags              String[]       @default([])
+  customFields      Json           @default("{}")
+  consentStatus     ConsentStatus  @default(UNKNOWN)
+  suppressedAt      DateTime?
+  externalId        String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  deletedAt         DateTime?
+
+  workspace       Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  organization    Organization?            @relation(fields: [organizationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  owner           User?                    @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  campaignContacts CampaignContact[]
+  interactions     Interaction[]
+  recommendations  OutreachRecommendation[]
+  followUpTasks    FollowUpTask[]
+  bobRequests      BobGenerationRequest[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, externalId])
+  @@unique([workspaceId, email])
+  @@index([workspaceId, organizationId])
+  @@index([workspaceId, type])
+  @@index([workspaceId, consentStatus, suppressedAt])
+}
+
+model Campaign {
+  id             String         @id
+  workspaceId    String
+  name           String
+  description    String
+  type           CampaignType
+  objective      String
+  status         CampaignStatus @default(DRAFT)
+  ownerId        String
+  startAt        DateTime?
+  endAt          DateTime?
+  defaultTone    OutreachTone
+  quietHours     Json           @default("{}")
+  idempotencyKey String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  archivedAt     DateTime?
+
+  workspace        Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner            User                     @relation("CampaignOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  campaignContacts CampaignContact[]
+  interactions     Interaction[]
+  recommendations  OutreachRecommendation[]
+  followUpTasks    FollowUpTask[]
+  bobRequests      BobGenerationRequest[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, startAt])
+}
+
+model CampaignContact {
+  workspaceId   String
+  campaignId    String
+  contactId     String
+  stage         String
+  priority      Priority
+  assignedUserId String?
+  nextActionAt  DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign     Campaign  @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  contact      Contact   @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  assignedUser User?     @relation("CampaignContactAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  @@id([workspaceId, campaignId, contactId])
+  @@index([workspaceId, assignedUserId, nextActionAt])
+}
+
+model Interaction {
+  id                String               @id
+  workspaceId       String
+  campaignId        String?
+  contactId         String
+  channel           ContactChannel
+  direction         InteractionDirection
+  subject           String?
+  bodyText          String
+  occurredAt        DateTime
+  externalMessageId String?
+  deliveryStatus    DeliveryStatus
+  idempotencyKey    String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  Campaign?  @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  contact   Contact    @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  response  Response?
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, externalMessageId])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, contactId, occurredAt])
+  @@index([workspaceId, campaignId, occurredAt])
+}
+
+model Response {
+  id                         String                  @id
+  workspaceId                String
+  interactionId              String
+  classification             ResponseClassification
+  proposedClassification     ResponseClassification?
+  sentiment                  Sentiment
+  proposedSentiment          Sentiment?
+  urgency                    Urgency
+  proposedUrgency            Urgency?
+  responseTimeMinutes        Int
+  keyQuestion                String?
+  recommendedNextAction      String?
+  suggestedFollowUpAt        DateTime?
+  humanReviewed              Boolean                 @default(false)
+  reviewedById               String?
+  reviewedAt                 DateTime?
+  analysisProvenance         AnalysisProvenance
+  structuredMetadata         Json                    @default("{}")
+  createdAt                  DateTime                @default(now())
+  updatedAt                  DateTime                @updatedAt
+
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  interaction Interaction @relation(fields: [interactionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  reviewedBy  User?       @relation("ResponseReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([id, workspaceId])
+  @@unique([interactionId, workspaceId])
+  @@index([workspaceId, classification, createdAt])
+}
+
+model OutreachRecommendation {
+  id                    String               @id
+  workspaceId           String
+  campaignId            String
+  contactId             String
+  recommendedAt         DateTime
+  alternativeWindows    DateTime[]
+  confidence            Float
+  score                 Float
+  dataSufficiency       DataSufficiency
+  reasonCodes           String[]             @default([])
+  explanation           String
+  algorithmVersion      String
+  status                RecommendationStatus @default(PROPOSED)
+  acceptedAt            DateTime?
+  userAdjustedAt        DateTime?
+  dismissedAt           DateTime?
+  outcomeImproved       Boolean?
+  idempotencyKey        String
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  Campaign  @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  contact   Contact   @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  followUps FollowUpTask[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, contactId, recommendedAt])
+  @@index([workspaceId, status, recommendedAt])
+}
+
+model FollowUpTask {
+  id                    String         @id
+  workspaceId           String
+  campaignId            String
+  contactId             String
+  assignedUserId        String
+  recommendationId      String?
+  status                FollowUpStatus @default(OPEN)
+  priority              Priority
+  dueAt                 DateTime
+  reason                String
+  lastResponseSummary   String?
+  recommendedNextAction String?
+  lastNotificationAt    DateTime?
+  completedAt           DateTime?
+  snoozedUntil          DateTime?
+  idempotencyKey        String
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  workspace      Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign       Campaign                @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  contact        Contact                 @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  assignedUser   User                    @relation("FollowUpAssignee", fields: [assignedUserId], references: [id], onDelete: Restrict)
+  recommendation OutreachRecommendation? @relation(fields: [recommendationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  bobRequests    BobGenerationRequest[]
+  notifications  Notification[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, dueAt])
+  @@index([workspaceId, assignedUserId, status, dueAt])
+}
+
+model BobGenerationRequest {
+  id               String              @id
+  workspaceId      String
+  contactId        String
+  campaignId       String
+  followUpTaskId   String?
+  type             BobGenerationType
+  promptVersion    String
+  promptText       String              @default("")
+  approvedSourceRecordIds String[]      @default([])
+  contextVersion   Int                 @default(1)
+  status           BobGenerationStatus @default(AWAITING_BOB)
+  requestedById    String
+  requestedAt      DateTime            @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+  errorCode        String?
+  errorMessage     String?
+  idempotencyKey   String
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact      Contact       @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  campaign     Campaign      @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  followUpTask FollowUpTask? @relation(fields: [followUpTaskId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  requestedBy  User          @relation("BobRequestor", fields: [requestedById], references: [id], onDelete: Restrict)
+  draft        BobDraft?
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, status, requestedAt])
+}
+
+model BobDraft {
+  id                    String              @id
+  workspaceId           String
+  generationRequestId   String
+  subject               String
+  bodyText              String
+  bodyHtml              String?
+  rationale             String
+  recommendedNextAction String
+  suggestedFollowUpAt   DateTime?
+  confidence            Float
+  riskFlags             String[]            @default([])
+  sourceRecordIds       String[]            @default([])
+  generatedAt           DateTime
+  provenance            DraftProvenance
+  providerOperationId   String?
+  approvalStatus        DraftApprovalStatus @default(PENDING_REVIEW)
+  approvedById          String?
+  approvedAt            DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  workspace         Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  generationRequest BobGenerationRequest @relation(fields: [generationRequestId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  approvedBy        User?                @relation("BobDraftApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([id, workspaceId])
+  @@unique([generationRequestId, workspaceId])
+  @@index([workspaceId, approvalStatus, generatedAt])
+}
+
+model Notification {
+  id               String             @id
+  workspaceId      String
+  userId           String
+  followUpTaskId   String?
+  channel          NotificationChannel
+  status           NotificationStatus
+  title            String
+  message          String
+  payload          Json               @default("{}")
+  scheduledFor     DateTime
+  sentAt           DateTime?
+  deduplicationKey String
+  providerMessageId String?
+  errorCode        String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  followUpTask FollowUpTask? @relation(fields: [followUpTaskId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+
+  @@unique([workspaceId, deduplicationKey])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, userId, status, scheduledFor])
+}
+
+model SheetConnection {
+  id                  String                @id
+  workspaceId         String
+  spreadsheetId       String
+  worksheetId         String
+  displayName         String
+  syncDirection       SheetSyncDirection
+  schedule            String?
+  syncCursor           String?
+  credentialReference String?
+  writeBackEnabled    Boolean               @default(false)
+  lastSyncedAt        DateTime?
+  status              SheetConnectionStatus @default(NEEDS_AUTH)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fieldMappings SheetFieldMapping[]
+  syncRuns      SheetSyncRun[]
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, spreadsheetId, worksheetId])
+  @@index([workspaceId, status])
+}
+
+model SheetFieldMapping {
+  id                String   @id
+  workspaceId       String
+  sheetConnectionId String
+  sourceColumn      String
+  targetEntity      String
+  targetField       String
+  transformation    String?
+  required          Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sheetConnection SheetConnection @relation(fields: [sheetConnectionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([workspaceId, sheetConnectionId, sourceColumn, targetEntity, targetField])
+  @@unique([id, workspaceId])
+}
+
+model SheetSyncRun {
+  id                String          @id
+  workspaceId       String
+  sheetConnectionId String
+  status            SheetSyncStatus
+  startedAt         DateTime
+  completedAt       DateTime?
+  rowsRead          Int             @default(0)
+  rowsCreated       Int             @default(0)
+  rowsUpdated       Int             @default(0)
+  rowsSkipped       Int             @default(0)
+  rowsFailed        Int             @default(0)
+  errorSummary      String?
+  dryRun            Boolean         @default(false)
+  cursorBefore      String?
+  cursorAfter       String?
+  idempotencyKey    String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sheetConnection SheetConnection @relation(fields: [sheetConnectionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, sheetConnectionId, startedAt])
+}
+
+model AuditEvent {
+  id          String         @id
+  workspaceId String
+  actorType   AuditActorType
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String
+  metadata    Json           @default("{}")
+  occurredAt  DateTime       @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, occurredAt])
+  @@index([workspaceId, entityType, entityId])
+  @@index([workspaceId, action, occurredAt])
+}

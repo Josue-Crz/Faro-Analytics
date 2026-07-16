@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "faro": {
+      "command": "pnpm",
+      "args": ["--dir", "/absolute/path/to/Faro-Analytics", "mcp:faro"],
+      "env": {
+        "DATABASE_URL": "postgresql://faro:faro_dev@localhost:5432/faro?schema=public",
+        "FARO_MCP_TOKEN": "replace-with-a-scoped-token",
+        "FARO_WORKSPACE_ID": "ws-beacon-lab"
+      }
+    },
+    "faro-google-sheets": {
+      "command": "pnpm",
+      "args": ["--dir", "/absolute/path/to/Faro-Analytics", "mcp:sheets"],
+      "env": {
+        "FARO_MCP_TOKEN": "replace-with-a-scoped-token",
+        "FARO_WORKSPACE_ID": "ws-beacon-lab"
+      }
+    }
+  }
+}

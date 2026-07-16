@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: faro
+      POSTGRES_PASSWORD: faro_dev
+      POSTGRES_USER: faro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U faro -d faro']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - '5432:5432'
+    volumes:
+      - faro_postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - '6379:6379'
+    volumes:
+      - faro_redis:/data
+
+volumes:
+  faro_postgres:
+  faro_redis:

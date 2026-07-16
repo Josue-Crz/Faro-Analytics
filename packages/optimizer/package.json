@@ -1,0 +1,22 @@
+{
+  "name": "@faro/optimizer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic and explainable outreach-window scoring for Faro",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --root ../.. packages/optimizer/src/index.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

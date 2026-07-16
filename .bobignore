@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+config.json
+node_modules/
+.next/
+coverage/
+playwright-report/
+test-results/
+*.log
+credentials*.json
+token*.json
+packages/database/generated/
