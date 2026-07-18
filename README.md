@@ -239,41 +239,82 @@ fictional and all external integrations remain accurately disabled or preview-on
 
 ### PostgreSQL-backed development
 
+Put `DATABASE_URL` and the other local values in the repository-root `.env`, then run these commands
+from the repository root:
+
 ```bash
 docker compose up -d postgres redis
-export FARO_DATA_SOURCE=database
-export FARO_ENABLE_UNAUTHENTICATED_DEMO_DB_ACCESS=true # local fictional seed only
+docker compose ps
 pnpm db:generate
 pnpm db:deploy
-pnpm db:seed
 pnpm dev
 ```
 
-The checked-in initial migration—not `prisma db push`—is the production migration contract.
-Database mode needs an application repository adapter for every UI route; the current UI tour uses
-the demo repository while the schema, seed, services, and MCP lifecycle are exercised independently.
+Wait until `docker compose ps` reports PostgreSQL and Redis as `healthy` before deploying migrations.
+Open <http://localhost:3000>; use that same hostname throughout Google OAuth rather than switching
+between `localhost`, `127.0.0.1`, and the machine's network IP. Run `pnpm worker` in a second terminal
+only when automatic Google Sheet polling is configured.
+
+The checked-in migrations—not `prisma db push`—are the production migration contract. Running
+`pnpm db:seed` is optional and adds fictional data; do not run it when you want a clean connected
+tester workspace.
+
+### Everyday server startup
+
+After initial installation and migration, start Faro with:
+
+```bash
+docker compose up -d postgres redis
+docker compose ps
+pnpm dev
+```
+
+Stop the web server with `Ctrl+C`. Stop the local services when finished with:
+
+```bash
+docker compose stop
+```
+
+### `DATABASE_URL` missing during Prisma commands
+
+Faro keeps its local `.env` at the repository root, but pnpm launches Prisma from
+`packages/database`. The Prisma configuration explicitly loads the root `.env` so commands such as
+`pnpm db:deploy` can see `DATABASE_URL`. If the command still reports `P1012` and
+`Environment variable not found: DATABASE_URL`:
+
+1. Confirm `.env` exists at the repository root, not only `.env.example`.
+2. Confirm it contains a non-empty `DATABASE_URL` matching `compose.yaml`.
+3. Run the command from the repository root.
+4. Confirm PostgreSQL is healthy with `docker compose ps`.
+
+Do not copy secrets into `packages/database` or commit `.env`.
 
 ## Environment variables
 
 Copy `.env.example`; never commit `.env`.
 
-| Variable                                     | Required            | Purpose / current behavior                                                                            |
-| -------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                               | Database mode       | PostgreSQL connection string. Local default matches Compose.                                          |
-| `FARO_DATA_SOURCE`                           | No                  | `demo` by default; `database` selects persistence adapters as they are wired.                         |
-| `FARO_DEMO_WORKSPACE_ID`                     | Demo                | Pins the fictional workspace (`ws-beacon-lab`).                                                       |
-| `FARO_ENABLE_UNAUTHENTICATED_DEMO_DB_ACCESS` | Local database demo | Explicitly unlocks fictional seed routes before production auth exists; never enable in a deployment. |
-| `AUTH_SECRET`                                | Deployment          | Placeholder for secure session signing. Demo identity is not production auth.                         |
-| `APP_URL`                                    | Deployment          | Canonical application URL.                                                                            |
-| `REDIS_URL`                                  | Future adapter      | Reserved Redis endpoint; the shipped worker is in-memory only.                                        |
-| `GOOGLE_CLIENT_ID`                           | Google OAuth        | Disabled until supplied and verified with the other Google variables.                                 |
-| `GOOGLE_CLIENT_SECRET`                       | Google OAuth        | Secret; never expose to IBM Bob or MCP results.                                                       |
-| `GOOGLE_REDIRECT_URI`                        | Google OAuth        | Exact validated callback URL.                                                                         |
-| `TOKEN_ENCRYPTION_KEY`                       | Google OAuth        | Managed encryption key for stored provider tokens.                                                    |
-| `FARO_MCP_TOKEN`                             | MCP process         | Non-placeholder launch-time scope gate; keep in a secret manager.                                     |
-| `FARO_WORKSPACE_ID`                          | MCP process         | Pins one stdio process to one workspace.                                                              |
-| `BOB_RUNTIME_ADAPTER`                        | No                  | `unavailable`; no network adapter is invented.                                                        |
-| `NOTIFICATION_ADAPTER`                       | No                  | `preview`; never reports external delivery.                                                           |
+| Variable                                     | Required             | Purpose / current behavior                                                                                                                          |
+| -------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                               | Database mode        | PostgreSQL connection string. Local default matches Compose.                                                                                        |
+| `FARO_DATA_SOURCE`                           | No                   | `demo` by default; `database` selects persistence adapters as they are wired.                                                                       |
+| `FARO_DEMO_WORKSPACE_ID`                     | Demo                 | Pins the fictional workspace (`ws-beacon-lab`).                                                                                                     |
+| `FARO_ENABLE_UNAUTHENTICATED_DEMO_DB_ACCESS` | Local database demo  | Explicitly unlocks fictional seed routes before production auth exists; never enable in a deployment.                                               |
+| `AUTH_SECRET`                                | Deployment           | Placeholder for secure session signing. Demo identity is not production auth.                                                                       |
+| `APP_URL`                                    | Deployment           | Canonical application URL.                                                                                                                          |
+| `REDIS_URL`                                  | Future adapter       | Reserved Redis endpoint; the shipped worker is in-memory only.                                                                                      |
+| `GOOGLE_CLIENT_ID`                           | Google OAuth         | Disabled until supplied and verified with the other Google variables.                                                                               |
+| `GOOGLE_CLIENT_SECRET`                       | Google OAuth         | Secret; never expose to IBM Bob or MCP results.                                                                                                     |
+| `GOOGLE_REDIRECT_URI`                        | Google OAuth         | Exact validated callback URL.                                                                                                                       |
+| `TOKEN_ENCRYPTION_KEY`                       | Google OAuth         | Managed encryption key for stored provider tokens.                                                                                                  |
+| `FARO_TESTER_EMAILS`                         | Deployment           | Comma-separated Google identities allowed into connected tester workspaces.                                                                         |
+| `FARO_SYNC_CRON_SECRET`                      | Deployment           | Bearer secret protecting the scheduled Google Sheet refresh endpoint.                                                                               |
+| `FARO_WEB_URL`                               | Worker               | Faro web origin used by the Sheet polling worker, such as `http://localhost:3000`.                                                                  |
+| `FARO_SHEET_POLL_INTERVAL_MS`                | Worker               | Near-real-time polling interval; Faro enforces a minimum of 15 seconds.                                                                             |
+| `FARO_MCP_TOKEN`                             | MCP process          | Non-placeholder launch-time scope gate; keep in a secret manager.                                                                                   |
+| `FARO_WORKSPACE_ID`                          | MCP process          | Pins one stdio process to one workspace.                                                                                                            |
+| `BOB_RUNTIME_ADAPTER`                        | No                   | `unavailable`; no network adapter is invented.                                                                                                      |
+| `BOBSHELL_API_KEY`                           | Bob Shell automation | IBM Bob Inference API key; keep only in `.env` or deployment secret storage. It is unused until the verified Bob Shell runtime adapter is deployed. |
+| `NOTIFICATION_ADAPTER`                       | No                   | `preview`; never reports external delivery.                                                                                                         |
 
 ## Database, migrations, and seed
 
@@ -292,6 +333,9 @@ Tenant-owned relations use workspace-aware indexes and composite constraints. Th
 run repeatedly and labels both static drafts `DEMO_DRAFT` with no provider operation ID.
 
 ## Google Sheets setup
+
+For the combined contacts, follow-ups, Gmail history, and IBM Bob drafting workflow, follow the
+page-by-page [Gmail outreach and IBM Bob setup guide](docs/EMAIL_OUTREACH_AND_BOB.md).
 
 The local fixture path is ready now:
 
@@ -321,6 +365,12 @@ The launch token is a process-presence/scope gate, not per-call bearer authentic
 deployment must bind an expiring principal and permissions at the process/transport boundary.
 
 Read the complete [IBM Bob workflow](docs/IBM_BOB_WORKFLOW.md).
+
+For Google Console links, secret generation, tester login, and deployment preflight, read
+[tester deployment and integration setup](docs/DEPLOYMENT_INTEGRATIONS.md).
+
+Connected campaign membership and real database-derived metrics are documented in
+[campaign associations and analytics](docs/CAMPAIGN_ANALYTICS.md).
 
 ### IBM Bob-only AI policy
 

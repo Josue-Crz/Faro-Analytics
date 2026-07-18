@@ -4,6 +4,8 @@ import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { contacts } from '@/lib/demo-data';
+import { prisma } from '@faro/database';
+import { sessionFromRequest } from '@/lib/server/auth';
 import { isDemoApiAccessAllowed } from '@/lib/server/demo-boundary';
 import { checkRateLimit } from '@/lib/server/rate-limit';
 
@@ -16,7 +18,8 @@ const previewSchema = z
   .strict();
 
 export async function POST(request: NextRequest) {
-  if (!isDemoApiAccessAllowed()) {
+  const session = await sessionFromRequest(request);
+  if (!session && !isDemoApiAccessAllowed()) {
     return NextResponse.json(
       {
         error: 'PRODUCTION_AUTH_REQUIRED',
@@ -37,9 +40,21 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  const existingContacts = session
+    ? await prisma.contact.findMany({
+        select: { email: true, id: true },
+        where: { deletedAt: null, workspaceId: session.workspaceId },
+      })
+    : contacts.map((contact) => ({ id: contact.id, email: contact.email }));
   const preview = previewContactImport({
     conflictBehavior: 'UPDATE',
-    existingContacts: contacts.map((contact) => ({ id: contact.id, email: contact.email })),
+    createDefaults: {
+      consentStatus: 'UNKNOWN',
+      preferredChannel: 'EMAIL',
+      timezone: 'America/Los_Angeles',
+      type: 'OTHER',
+    },
+    existingContacts,
     ...parsed.data,
   });
   const minimizedPreview = {

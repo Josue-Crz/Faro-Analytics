@@ -28,6 +28,7 @@ config.json
 !.bob/mcp.example.json
 credentials*.json
 token*.json
+secrets.txt
 
 # Editors
 .idea/

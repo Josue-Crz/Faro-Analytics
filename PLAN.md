@@ -21,8 +21,9 @@ integration and must never become an application dependency or committed credent
   exchanges governed context through the Faro MCP server. There is no fallback AI provider.
 - **Timing:** a versioned deterministic optimizer produces reproducible windows, reason codes,
   confidence, data-sufficiency labels, and hard suppression/quiet-hour guards.
-- **Sheets:** a shared typed client and mapping engine power dry-run preview and MCP tools. OAuth and
-  writes remain disabled until real credentials and encrypted token storage are configured.
+- **Sheets:** a shared typed client and mapping engine power preview and MCP tools. An allowlisted
+  Google tester flow encrypts tokens, reads an explicit spreadsheet/range, and transactionally
+  imports recognized sponsor/contact fields into PostgreSQL. Sheet write-back remains disabled.
 - **Notifications:** provider contracts separate internal reminders from external outreach. The
   default preview adapter records truthful development-only deliveries.
 - **Jobs:** an explicitly labeled in-memory repository powers the development worker. PostgreSQL

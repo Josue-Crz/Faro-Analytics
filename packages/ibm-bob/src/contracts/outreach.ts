@@ -51,6 +51,7 @@ export const outreachDraftInputSchema = z
     workspaceId: bobIdentifierSchema,
     contact: outreachContactContextSchema,
     campaign: outreachCampaignContextSchema,
+    additionalContext: z.string().trim().max(6_000).optional(),
     interactionHistory: z.array(outreachInteractionSchema).max(20).default([]),
     latestResponse: optionalBoundedTextSchema,
     latestResponseSourceRecordId: bobIdentifierSchema.optional(),

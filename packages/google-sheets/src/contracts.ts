@@ -14,6 +14,7 @@ export const sheetScopeSchema = z
   .strict();
 
 export const contactFieldSchema = z.enum([
+  'fullName',
   'firstName',
   'lastName',
   'email',

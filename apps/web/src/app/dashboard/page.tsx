@@ -1,10 +1,12 @@
 'use client';
 
 import { ArrowRight, Renew, SettingsAdjust } from '@carbon/icons-react';
-import { Button } from '@carbon/react';
+import { Button, InlineNotification } from '@carbon/react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 
+import { ConnectedDashboard } from '@/components/ConnectedDashboard';
 import { MetricCard } from '@/components/MetricCard';
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -31,6 +33,44 @@ const ResponseTrendChart = dynamic(
 const heatmapTimes = ['8 AM', '10 AM', '12 PM', '2 PM', '4 PM', '6 PM'];
 
 export default function DashboardPage() {
+  const [workspaceMode, setWorkspaceMode] = useState<'loading' | 'empty' | 'demo' | 'connected'>(
+    'loading',
+  );
+  useEffect(() => {
+    void fetch('/api/auth/session', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((result: { authenticated?: boolean; mode?: string }) =>
+        setWorkspaceMode(
+          result.authenticated ? 'connected' : result.mode === 'FALLBACK' ? 'demo' : 'empty',
+        ),
+      )
+      .catch(() => setWorkspaceMode('empty'));
+  }, []);
+  if (workspaceMode === 'loading')
+    return <div className="skeleton" style={{ height: '20rem' }} aria-label="Loading dashboard" />;
+  if (workspaceMode === 'connected') return <ConnectedDashboard />;
+  if (workspaceMode === 'empty')
+    return (
+      <div className="page-shell">
+        <PageHeader
+          actions={
+            <Button href="/api/auth/google/start?returnTo=/integrations/google-sheets">
+              Connect Google account
+            </Button>
+          }
+          description="Connect Google to create a private workspace. Contacts, organizations, campaigns, and follow-ups begin empty."
+          eyebrow="New workspace"
+          title="Welcome to Faro"
+        />
+        <InlineNotification
+          hideCloseButton
+          kind="info"
+          lowContrast
+          title="No fictional records are loaded"
+          subtitle="The Jordan Lee preview appears only after an OAuth failure. Successful authentication opens an empty connected workspace."
+        />
+      </div>
+    );
   const openFollowUps = followUps.filter((item) => item.dueGroup !== 'Completed').slice(0, 4);
 
   return (

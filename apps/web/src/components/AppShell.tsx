@@ -7,6 +7,7 @@ import {
   Dashboard,
   DataBase,
   Enterprise,
+  Email,
   Light,
   Notification,
   Search,
@@ -30,12 +31,16 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { LighthouseMark } from './LighthouseMark';
+import { ConnectedWorkspaceRecords } from './ConnectedWorkspaceRecords';
+import { ConnectedSettings } from './ConnectedSettings';
+import { PageHeader } from './PageHeader';
 
 const primaryNav = [
   { href: '/dashboard', label: 'Dashboard', icon: Dashboard },
   { href: '/contacts', label: 'Contacts', icon: UserMultiple },
   { href: '/organizations', label: 'Organizations', icon: Enterprise },
   { href: '/campaigns', label: 'Campaigns', icon: Bullhorn },
+  { href: '/outreach', label: 'Outreach', icon: Email },
   { href: '/follow-ups', label: 'Follow-ups', icon: Task, badge: '18' },
   { href: '/analytics', label: 'Analytics', icon: Analytics },
 ];
@@ -44,6 +49,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(false);
   const [dark, setDark] = useState(false);
+  const [identity, setIdentity] = useState({
+    authenticated: false,
+    fallback: false,
+    loaded: false,
+    name: 'Guest',
+  });
+
+  useEffect(() => {
+    void fetch('/api/auth/session', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((result: { authenticated?: boolean; mode?: string; user?: { name?: string } }) => {
+        setIdentity({
+          authenticated: Boolean(result.authenticated),
+          fallback: result.mode === 'FALLBACK',
+          loaded: true,
+          name: result.user?.name ?? 'Guest',
+        });
+      })
+      .catch(() => setIdentity((current) => ({ ...current, loaded: true })));
+  }, []);
 
   useEffect(() => {
     const themeTimer = window.setTimeout(() => {
@@ -84,15 +109,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button
             className="workspace-switcher"
             type="button"
-            aria-label="Workspace selector unavailable in demo"
+            aria-label="Current workspace"
             disabled
-            title="The demo contains one workspace"
+            title="Workspace switching is not configured"
           >
             <span className="workspace-switcher__label">Workspace</span>
-            <span>Northstar Programs</span>
+            <span>
+              {identity.authenticated
+                ? `${identity.name}'s workspace`
+                : identity.fallback
+                  ? 'Demo fallback'
+                  : 'Not connected'}
+            </span>
             <span aria-hidden="true">⌄</span>
           </button>
-          <span className="header-date">Jun 11 – Jul 10, 2026</span>
+          {identity.fallback ? <span className="header-date">Fictional preview</span> : null}
         </div>
         <HeaderGlobalBar>
           <button
@@ -124,11 +155,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button
             className="user-avatar"
             type="button"
-            aria-label="Jordan Lee demo identity"
-            disabled
-            title="Demo identity"
+            aria-label={
+              identity.authenticated ? `${identity.name} connected identity` : 'Sign in with Google'
+            }
+            onClick={() => {
+              if (!identity.authenticated) window.location.assign('/api/auth/google/start');
+            }}
+            title={identity.authenticated ? 'Connected workspace' : 'Sign in with Google'}
           >
-            JL
+            {identity.name
+              .split(' ')
+              .slice(0, 2)
+              .map((part) => part[0])
+              .join('')}
           </button>
         </HeaderGlobalBar>
       </Header>
@@ -148,7 +187,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               renderIcon={icon}
             >
               <span>{label}</span>
-              {badge ? <span className="nav-badge">{badge}</span> : null}
+              {badge && identity.fallback ? <span className="nav-badge">{badge}</span> : null}
             </SideNavLink>
           ))}
           <SideNavMenu defaultExpanded renderIcon={DataBase} title="Integrations">
@@ -177,14 +216,60 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="side-status">
           <span className="signal-pulse" aria-hidden="true" />
           <span>
-            <strong>Demo workspace</strong>
-            <small>Fictional seeded data</small>
+            <strong>
+              {identity.authenticated
+                ? 'Connected workspace'
+                : identity.fallback
+                  ? 'Demo fallback'
+                  : 'Workspace not connected'}
+            </strong>
+            <small>
+              {identity.authenticated
+                ? 'Google-authenticated tester'
+                : identity.fallback
+                  ? 'OAuth failed · fictional data'
+                  : 'Sign in to begin with empty data'}
+            </small>
           </span>
         </div>
       </SideNav>
 
       <main className="product-main" id="main-content" tabIndex={-1}>
-        {children}
+        {!identity.loaded ? (
+          <div className="skeleton" style={{ height: '18rem' }} aria-label="Loading workspace" />
+        ) : identity.authenticated &&
+          [
+            '/analytics',
+            '/campaigns',
+            '/contacts',
+            '/follow-ups',
+            '/organizations',
+            '/outreach',
+          ].some((route) => pathname.startsWith(route)) ? (
+          <ConnectedWorkspaceRecords pathname={pathname} />
+        ) : identity.authenticated && pathname.startsWith('/settings/') ? (
+          <ConnectedSettings pathname={pathname} />
+        ) : !identity.authenticated &&
+          !identity.fallback &&
+          [
+            '/analytics',
+            '/campaigns',
+            '/contacts',
+            '/follow-ups',
+            '/outreach',
+            '/organizations',
+            '/settings/',
+          ].some((route) => pathname.startsWith(route)) ? (
+          <div className="page-shell">
+            <PageHeader
+              description="Connect Google to create an empty authenticated workspace. Until then, Faro shows setup guidance without invented users, settings, or activity."
+              eyebrow="Setup required"
+              title="Connect your workspace"
+            />
+          </div>
+        ) : (
+          children
+        )}
       </main>
     </Theme>
   );

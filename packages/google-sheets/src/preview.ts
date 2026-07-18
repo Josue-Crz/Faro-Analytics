@@ -1,6 +1,6 @@
 import type { ConflictBehavior, SheetFieldMapping, SheetRow } from './contracts';
 import {
-  mapContactRow,
+  mapContactRowVariants,
   validateCanonicalContactCreate,
   validateCanonicalContactValues,
   validateMapping,
@@ -81,9 +81,13 @@ export function previewContactImport(input: PreviewContactImportInput): SheetImp
 
   const seenEmails = new Map<string, number>();
   const seenExternalIds = new Map<string, number>();
-  const rows = input.rows.map<PreviewRow>((row, index) => {
-    const rowNumber = (input.firstDataRowNumber ?? 2) + index;
-    const mapped = mapContactRow(row, input.mappings);
+  const expandedRows = input.rows.flatMap((row, index) =>
+    mapContactRowVariants(row, input.mappings).map((mapped) => ({
+      mapped,
+      rowNumber: (input.firstDataRowNumber ?? 2) + index,
+    })),
+  );
+  const rows = expandedRows.map<PreviewRow>(({ mapped, rowNumber }) => {
     let contact = mapped.contact;
     const issues = mapped.issues;
     const email = normalizeEmail(contact.email);

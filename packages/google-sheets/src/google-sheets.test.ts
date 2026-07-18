@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { SheetFieldMapping, SheetScope } from './contracts';
 import { FixtureGoogleSheetsClient } from './fixture-client';
-import { suggestHeaderMappings } from './mapping';
+import { inferHeaderMappings, suggestHeaderMappings } from './mapping';
 import { previewContactImport } from './preview';
 import { protectFormulaCell } from './writeback';
 
@@ -46,6 +46,59 @@ describe('Google Sheets mapping', () => {
       expect.objectContaining({ sourceColumn: 'Email', targetField: 'email' }),
       expect.objectContaining({ sourceColumn: 'Company', targetField: 'organizationName' }),
     ]);
+  });
+
+  it('infers a combined name and preserves unfamiliar columns as custom fields', () => {
+    const inferred = inferHeaderMappings(['Contact Name', 'Primary Email', 'Favorite Color']);
+    expect(inferred).toEqual([
+      expect.objectContaining({ confidence: 'HIGH', targetField: 'fullName' }),
+      expect.objectContaining({ confidence: 'HIGH', targetField: 'email' }),
+      expect.objectContaining({ confidence: 'LOW', targetField: 'customFields.Favorite_Color_3' }),
+    ]);
+    const preview = previewContactImport({
+      createDefaults: { preferredChannel: 'EMAIL', timezone: 'UTC', type: 'OTHER' },
+      headers: ['Contact Name', 'Primary Email', 'Favorite Color'],
+      mappings: inferred.map(({ confidence: _confidence, reason: _reason, ...mapping }) => mapping),
+      rows: [
+        {
+          'Contact Name': 'Avery Jordan',
+          'Favorite Color': 'blue',
+          'Primary Email': 'avery@example.test',
+        },
+      ],
+    });
+    expect(preview.rows[0]).toMatchObject({
+      action: 'CREATE',
+      contact: {
+        customFields: { Favorite_Color_3: 'blue' },
+        firstName: 'Avery',
+        lastName: 'Jordan',
+      },
+    });
+  });
+
+  it('expands positional name and email lists into multiple contacts for one organization', () => {
+    const inferred = inferHeaderMappings(['Contact Name', 'Primary Email', 'Company']);
+    const preview = previewContactImport({
+      createDefaults: { preferredChannel: 'EMAIL', timezone: 'UTC', type: 'OTHER' },
+      headers: ['Contact Name', 'Primary Email', 'Company'],
+      mappings: inferred.map(({ confidence: _confidence, reason: _reason, ...mapping }) => mapping),
+      rows: [
+        {
+          Company: 'Shared Organization',
+          'Contact Name': 'Avery Jordan, Morgan Lee',
+          'Primary Email': 'avery@example.test, morgan@example.test',
+        },
+      ],
+    });
+    expect(preview.summary).toMatchObject({ rowsCreate: 2, rowsError: 0, rowsRead: 2 });
+    expect(preview.rows.map((row) => row.contact.email)).toEqual([
+      'avery@example.test',
+      'morgan@example.test',
+    ]);
+    expect(
+      preview.rows.every((row) => row.contact.organizationName === 'Shared Organization'),
+    ).toBe(true);
   });
 
   it('previews create/update actions and catches duplicate identities within the sheet', () => {

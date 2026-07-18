@@ -271,6 +271,20 @@ model User {
   bobRequestsRequested     BobGenerationRequest[] @relation("BobRequestor")
   bobDraftsApproved        BobDraft[]             @relation("BobDraftApprover")
   notifications            Notification[]
+  googleCredential         GoogleCredential?
+}
+
+model GoogleCredential {
+  id                    String   @id
+  userId                String   @unique
+  encryptedAccessToken  String
+  encryptedRefreshToken String?
+  grantedScopes         String
+  accessTokenExpiresAt  DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Membership {
@@ -646,6 +660,8 @@ model SheetConnection {
   workspaceId         String
   spreadsheetId       String
   worksheetId         String
+  readRange           String                @default("A1:ZZ1001")
+  headerRow           Int                   @default(1)
   displayName         String
   syncDirection       SheetSyncDirection
   schedule            String?
@@ -653,6 +669,8 @@ model SheetConnection {
   credentialReference String?
   writeBackEnabled    Boolean               @default(false)
   lastSyncedAt        DateTime?
+  lastErrorCode       String?
+  lastErrorAt         DateTime?
   status              SheetConnectionStatus @default(NEEDS_AUTH)
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
