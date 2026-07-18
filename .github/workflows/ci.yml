@@ -72,6 +72,8 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      FARO_DATA_SOURCE: database
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
