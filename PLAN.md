@@ -17,8 +17,9 @@ integration and must never become an application dependency or committed credent
 - **Tenancy:** every tenant-owned record carries `workspaceId`; application and MCP service methods
   require an authorized workspace scope rather than trusting client-supplied IDs.
 - **IBM Bob:** contracts, versioned prompts, validated outputs, and a request lifecycle are isolated
-  in `packages/ibm-bob`. Without a verified Bob runtime, requests remain `AWAITING_BOB` and Bob
-  exchanges governed context through the Faro MCP server. There is no fallback AI provider.
+  in `packages/ibm-bob`. Requests default to `AWAITING_BOB` for governed processing through Faro
+  MCP. An explicitly configured local Bob Shell adapter can complete the same lifecycle with a real
+  IBM Bob result. There is no fallback AI provider.
 - **Timing:** a versioned deterministic optimizer produces reproducible windows, reason codes,
   confidence, data-sufficiency labels, and hard suppression/quiet-hour guards.
 - **Sheets:** a shared typed client and mapping engine power preview and MCP tools. An allowlisted
@@ -41,8 +42,9 @@ integration and must never become an application dependency or committed credent
 
 ## Risks and assumptions
 
-- IBM Bob has no repository-provided verified network SDK or endpoint, so only the MCP workflow is
-  enabled. The UI must say `Awaiting IBM Bob`, never simulate generated output.
+- Faro does not infer a Bob network SDK or endpoint. The default MCP workflow keeps requests at
+  `Awaiting IBM Bob`; the opt-in local Bob Shell path may label output as generated only after a
+  real command succeeds and the result passes validation.
 - Google OAuth, email, push, and SMS require credentials/providers and remain accurate disabled or
   development-preview states.
 - The demo workspace is fictional and intentionally separate from the PostgreSQL repository mode.

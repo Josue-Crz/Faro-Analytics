@@ -107,10 +107,10 @@ Use `FARO_DATA_SOURCE=database` and never enable
 
 ## Configure IBM Bob
 
-There is no Bob model API key consumed by the Faro web app. Install/sign in to IBM Bob, open its MCP
+Choose one of two IBM Bob paths. For MCP-first operation, install/sign in to IBM Bob, open its MCP
 settings, and register the Faro servers using the ignored `.bob/mcp.json` copied from
 `.bob/mcp.example.json`. Supply `DATABASE_URL`, one `FARO_WORKSPACE_ID`, and a random
-`FARO_MCP_TOKEN` through the process environment.
+`FARO_MCP_TOKEN` through the process environment. No Bob model key is consumed by this path.
 
 After the first import, the connected dashboard displays the tester workspace ID. Put that exact
 value in `.bob/mcp.json` as `FARO_WORKSPACE_ID`, restart Faro MCP, and start a new Bob task. Ask Bob
@@ -120,6 +120,13 @@ for human review. The web app does not consume a Bob model API key and does not 
 The included server uses local stdio. A shared deployment needs an authenticated, encrypted,
 workspace-bound Streamable HTTP transport before it can be called multi-tenant. Until that is
 implemented and verified, leave `BOB_RUNTIME_ADAPTER=unavailable` and use Bob locally through MCP.
+
+For a single-user or controlled tester environment, the opt-in local Bob Shell adapter can complete
+requests from the web process. Install and verify Bob Shell, store an active IBM Bob Inference key
+as `BOBSHELL_API_KEY`, set `BOB_RUNTIME_ADAPTER=bob-shell`, and restart the application. This runs a
+local child process and is not a general multi-tenant network integration. Verify one real request
+and its `IBM_BOB` provenance before describing the runtime as connected. Never expose the key to the
+browser or commit it.
 
 ## Preflight
 

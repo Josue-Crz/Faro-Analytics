@@ -14,6 +14,11 @@ requests through IBM Bob—always with visible provenance and human approval.
 The name comes from the Spanish word _faro_, “lighthouse.” The product is designed as a calm control
 center: enough context to navigate the next decision without burying the team in activity noise.
 
+Faro was created as a hackathon project to demonstrate that useful AI-assisted outreach needs more
+than text generation. It combines governed data, explainable timing, IBM Bob drafting, validation,
+and human approval in one end-to-end workflow. See the
+[hackathon story and real-world applications](docs/HACKATHON_AND_USE_CASES.md).
+
 ![Faro lighthouse projecting a signal across outreach data](docs/assets/faro-hero.svg)
 
 > Faro uses Carbon and an IBM-inspired visual language. It is not an official IBM product and does
@@ -36,6 +41,18 @@ center: enough context to navigate the next decision without burying the team in
   push, or SMS was delivered.
 - **Sponsorship intelligence:** configurable pipeline stages, estimated and weighted value,
   decision-maker coverage, campaign comparison, and follow-up health.
+
+## Real-world applications
+
+Faro's original scenario is hackathon sponsorship: import a sponsor pipeline, identify the next
+relationship action, use IBM Bob to prepare a grounded draft, and keep the organizer in control of
+what is sent. The same governed workflow applies to nonprofit fundraising, university and community
+partnerships, business development, customer success, and other relationship-driven teams.
+
+In each case, Faro is the control and evidence layer—not an autonomous sender. It scopes the facts,
+enforces consent and suppression, calculates timing, validates Bob's structured result, records
+provenance, and requires a person to review the message. The detailed scenarios and a suggested
+hackathon demo flow are in [Hackathon story and real-world applications](docs/HACKATHON_AND_USE_CASES.md).
 
 ## Interface
 
@@ -293,28 +310,28 @@ Do not copy secrets into `packages/database` or commit `.env`.
 
 Copy `.env.example`; never commit `.env`.
 
-| Variable                                     | Required             | Purpose / current behavior                                                                                                                          |
-| -------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                               | Database mode        | PostgreSQL connection string. Local default matches Compose.                                                                                        |
-| `FARO_DATA_SOURCE`                           | No                   | `demo` by default; `database` selects persistence adapters as they are wired.                                                                       |
-| `FARO_DEMO_WORKSPACE_ID`                     | Demo                 | Pins the fictional workspace (`ws-beacon-lab`).                                                                                                     |
-| `FARO_ENABLE_UNAUTHENTICATED_DEMO_DB_ACCESS` | Local database demo  | Explicitly unlocks fictional seed routes before production auth exists; never enable in a deployment.                                               |
-| `AUTH_SECRET`                                | Deployment           | Placeholder for secure session signing. Demo identity is not production auth.                                                                       |
-| `APP_URL`                                    | Deployment           | Canonical application URL.                                                                                                                          |
-| `REDIS_URL`                                  | Future adapter       | Reserved Redis endpoint; the shipped worker is in-memory only.                                                                                      |
-| `GOOGLE_CLIENT_ID`                           | Google OAuth         | Disabled until supplied and verified with the other Google variables.                                                                               |
-| `GOOGLE_CLIENT_SECRET`                       | Google OAuth         | Secret; never expose to IBM Bob or MCP results.                                                                                                     |
-| `GOOGLE_REDIRECT_URI`                        | Google OAuth         | Exact validated callback URL.                                                                                                                       |
-| `TOKEN_ENCRYPTION_KEY`                       | Google OAuth         | Managed encryption key for stored provider tokens.                                                                                                  |
-| `FARO_TESTER_EMAILS`                         | Deployment           | Comma-separated Google identities allowed into connected tester workspaces.                                                                         |
-| `FARO_SYNC_CRON_SECRET`                      | Deployment           | Bearer secret protecting the scheduled Google Sheet refresh endpoint.                                                                               |
-| `FARO_WEB_URL`                               | Worker               | Faro web origin used by the Sheet polling worker, such as `http://localhost:3000`.                                                                  |
-| `FARO_SHEET_POLL_INTERVAL_MS`                | Worker               | Near-real-time polling interval; Faro enforces a minimum of 15 seconds.                                                                             |
-| `FARO_MCP_TOKEN`                             | MCP process          | Non-placeholder launch-time scope gate; keep in a secret manager.                                                                                   |
-| `FARO_WORKSPACE_ID`                          | MCP process          | Pins one stdio process to one workspace.                                                                                                            |
-| `BOB_RUNTIME_ADAPTER`                        | No                   | `unavailable`; no network adapter is invented.                                                                                                      |
-| `BOBSHELL_API_KEY`                           | Bob Shell automation | IBM Bob Inference API key; keep only in `.env` or deployment secret storage. It is unused until the verified Bob Shell runtime adapter is deployed. |
-| `NOTIFICATION_ADAPTER`                       | No                   | `preview`; never reports external delivery.                                                                                                         |
+| Variable                                     | Required             | Purpose / current behavior                                                                                                     |
+| -------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                               | Database mode        | PostgreSQL connection string. Local default matches Compose.                                                                   |
+| `FARO_DATA_SOURCE`                           | No                   | `demo` by default; `database` selects persistence adapters as they are wired.                                                  |
+| `FARO_DEMO_WORKSPACE_ID`                     | Demo                 | Pins the fictional workspace (`ws-beacon-lab`).                                                                                |
+| `FARO_ENABLE_UNAUTHENTICATED_DEMO_DB_ACCESS` | Local database demo  | Explicitly unlocks fictional seed routes before production auth exists; never enable in a deployment.                          |
+| `AUTH_SECRET`                                | Deployment           | Placeholder for secure session signing. Demo identity is not production auth.                                                  |
+| `APP_URL`                                    | Deployment           | Canonical application URL.                                                                                                     |
+| `REDIS_URL`                                  | Future adapter       | Reserved Redis endpoint; the shipped worker is in-memory only.                                                                 |
+| `GOOGLE_CLIENT_ID`                           | Google OAuth         | Disabled until supplied and verified with the other Google variables.                                                          |
+| `GOOGLE_CLIENT_SECRET`                       | Google OAuth         | Secret; never expose to IBM Bob or MCP results.                                                                                |
+| `GOOGLE_REDIRECT_URI`                        | Google OAuth         | Exact validated callback URL.                                                                                                  |
+| `TOKEN_ENCRYPTION_KEY`                       | Google OAuth         | Managed encryption key for stored provider tokens.                                                                             |
+| `FARO_TESTER_EMAILS`                         | Deployment           | Comma-separated Google identities allowed into connected tester workspaces.                                                    |
+| `FARO_SYNC_CRON_SECRET`                      | Deployment           | Bearer secret protecting the scheduled Google Sheet refresh endpoint.                                                          |
+| `FARO_WEB_URL`                               | Worker               | Faro web origin used by the Sheet polling worker, such as `http://localhost:3000`.                                             |
+| `FARO_SHEET_POLL_INTERVAL_MS`                | Worker               | Near-real-time polling interval; Faro enforces a minimum of 15 seconds.                                                        |
+| `FARO_MCP_TOKEN`                             | MCP process          | Non-placeholder launch-time scope gate; keep in a secret manager.                                                              |
+| `FARO_WORKSPACE_ID`                          | MCP process          | Pins one stdio process to one workspace.                                                                                       |
+| `BOB_RUNTIME_ADAPTER`                        | No                   | Defaults to `unavailable` for the MCP-first flow; set to `bob-shell` only for the installed, verified local Bob Shell adapter. |
+| `BOBSHELL_API_KEY`                           | Bob Shell automation | IBM Bob Inference API key used only when `BOB_RUNTIME_ADAPTER=bob-shell`; keep it in `.env` or deployment secret storage.      |
+| `NOTIFICATION_ADAPTER`                       | No                   | `preview`; never reports external delivery.                                                                                    |
 
 ## Database, migrations, and seed
 
@@ -349,9 +366,13 @@ Live OAuth still requires the client/secret/redirect/encryption variables and a 
 repository. Until then the connection button is disabled, and Faro makes no Google API call or live
 sync claim. See [Google Sheets synchronization](docs/GOOGLE_SHEETS.md).
 
-## IBM Bob MCP setup
+## IBM Bob creation and integration
 
-Faro does not assume that IBM Bob exposes a generic network API. Without a verified runtime:
+Faro creates IBM Bob work through a governed lifecycle rather than calling a generic model API.
+Every request contains a versioned prompt, approved source IDs, workspace scope, and an idempotency
+key. There are two supported execution paths:
+
+### MCP-first workflow
 
 1. The web flow validates context and creates an `AWAITING_BOB` generation request.
 2. Copy `.bob/mcp.example.json` to ignored `.bob/mcp.json` and update the absolute path/secrets.
@@ -359,6 +380,17 @@ Faro does not assume that IBM Bob exposes a generic network API. Without a verif
 4. In database mode, Bob claims a persisted request, retrieves only approved workspace context,
    and saves validated structured output.
 5. A user edits and approves the result in Faro. No tool sends external outreach.
+
+### Optional local Bob Shell automation
+
+When IBM Bob Shell is installed and an IBM Bob Inference key is available, set
+`BOB_RUNTIME_ADAPTER=bob-shell` and `BOBSHELL_API_KEY` in the ignored `.env`. The web route invokes
+the local `bob` process, accepts only the required JSON shape, validates it through the same IBM Bob
+boundary, and saves it with IBM Bob provenance. Missing credentials, timeouts, command failures, or
+invalid output move the request to `FAILED`; they never produce a fabricated draft or a send action.
+
+The default remains `unavailable`, which keeps requests pending for MCP processing. This is useful
+for reviewers who do not have Bob Shell and avoids inventing an undocumented HTTP model endpoint.
 
 The default stdio launcher is explicit about whether a shared persistence backend is configured.
 The launch token is a process-presence/scope gate, not per-call bearer authentication; production
@@ -453,7 +485,8 @@ release requirements. See [accessibility notes](docs/ACCESSIBILITY.md).
 | Sheets MCP tools                                      | **Development adapter**                       | Typed, scoped dry-run preview only; no live connection or canonical write path is claimed.                |
 | Sheet mapping/preview/dedup/formula protection        | **Implemented**                               | Fixture path verified; PostgreSQL remains canonical.                                                      |
 | Live Google OAuth                                     | **Credentials + production adapter required** | UI is accurately disabled.                                                                                |
-| IBM Bob network runtime                               | **Unavailable**                               | MCP workflow only; no fallback provider.                                                                  |
+| IBM Bob MCP workflow                                  | **Implemented**                               | Pending requests, scoped context reads, validated writes, and audit events; no fallback provider.         |
+| Local IBM Bob Shell runtime                           | **Opt-in adapter**                            | Runs only when installed and explicitly configured; validated drafts still require human review.          |
 | Notification delivery                                 | **Development adapter**                       | In-app/preview only; no email/push/SMS delivery claim.                                                    |
 | Production authentication and distributed rate limit  | **Planned**                                   | Boundaries exist; deployment implementation required.                                                     |
 | Automated external outreach                           | **Not implemented by design**                 | Human review is the default safety policy.                                                                |

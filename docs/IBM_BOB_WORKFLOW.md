@@ -1,6 +1,12 @@
 # IBM Bob and Faro MCP workflow
 
-## Configure the server
+Faro supports two IBM Bob execution modes. The default MCP-first mode leaves a governed request in
+`AWAITING_BOB` until Bob processes it through Faro MCP. The optional local Bob Shell mode completes
+the same request directly from the web server when Bob Shell and an Inference key are explicitly
+configured. Both modes use the same contracts, validation, provenance, workspace controls, audit
+trail, and mandatory human review.
+
+## Option A — Configure the MCP server
 
 1. Start PostgreSQL and apply/seed the schema:
 
@@ -23,6 +29,27 @@ The development stdio process requires a non-placeholder launch token and pins a
 workspace. It does not perform per-call bearer-token authentication and is not a production identity
 provider. In production, bind the process/transport credential to a user or service identity,
 workspace, expiration, and an explicit read/write permission set.
+
+## Option B — Configure local Bob Shell
+
+1. Install IBM Bob Shell using IBM's documented installation flow and confirm that the `bob`
+   command is available locally.
+2. Create an active IBM Bob **Inference** API key. This is separate from an IDE MCP configuration.
+3. Add the following only to the ignored repository-root `.env`:
+
+   ```dotenv
+   BOB_RUNTIME_ADAPTER="bob-shell"
+   BOBSHELL_API_KEY="your-IBM-Bob-Inference-key"
+   ```
+
+4. Restart `pnpm dev`, because the web server reads the environment at startup.
+5. Create a draft request from Outreach. Faro runs Bob Shell with the governed prompt, a two-minute
+   timeout, bounded output, and an instruction to return exactly one JSON object.
+
+The adapter never passes a shell string, never asks Bob to send a message, and does not accept prose
+as a successful result. Missing installation or credentials, authentication failure, timeout,
+non-zero exit, and invalid JSON/schema output are recorded as safe failure codes. To return to the
+MCP-first workflow, set `BOB_RUNTIME_ADAPTER="unavailable"` and restart the server.
 
 ## Review pending requests
 
