@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 
 export default function NotificationSettingsPage() {
   const [saved, setSaved] = useState(false);
+  const [smsPreview, setSmsPreview] = useState(true);
   return (
     <div className="page-shell">
       <PageHeader
@@ -62,13 +63,13 @@ export default function NotificationSettingsPage() {
           <div className="panel__header">
             <div>
               <h2>SMS</h2>
-              <p>Optional adapter</p>
+              <p>Follow-up alert preview</p>
             </div>
-            <StatusBadge label="Not configured" status="attention" />
+            <StatusBadge label="Preview only" status="attention" />
           </div>
           <Phone size={28} />
           <p className="integration-card-copy">
-            No vendor is hard-coded and no SMS delivery is claimed.
+            Follow-up SMS alerts are visible in the demo audit. No external text is sent.
           </p>
         </article>
       </div>
@@ -83,31 +84,56 @@ export default function NotificationSettingsPage() {
           <div className="settings-list">
             <div>
               <span>
-                <strong>In-app notifications</strong>
+                <strong id="notify-in-app-label">In-app notifications</strong>
                 <small>Due, overdue, draft-ready, and sync issues</small>
               </span>
-              <Toggle defaultToggled id="notify-in-app" labelA="Off" labelB="On" />
+              <Toggle
+                aria-labelledby="notify-in-app-label"
+                defaultToggled
+                id="notify-in-app"
+                labelA="Off"
+                labelB="On"
+              />
             </div>
             <div>
               <span>
-                <strong>Email preview</strong>
+                <strong id="notify-email-label">Email preview</strong>
                 <small>Development adapter; no external delivery</small>
               </span>
-              <Toggle defaultToggled id="notify-email" labelA="Off" labelB="On" />
+              <Toggle
+                aria-labelledby="notify-email-label"
+                defaultToggled
+                id="notify-email"
+                labelA="Off"
+                labelB="On"
+              />
             </div>
             <div>
               <span>
-                <strong>Mobile web push</strong>
+                <strong id="notify-push-label">Mobile web push</strong>
                 <small>Permission and service worker not configured</small>
               </span>
-              <Toggle id="notify-push" labelA="Off" labelB="On" disabled />
+              <Toggle
+                aria-labelledby="notify-push-label"
+                disabled
+                id="notify-push"
+                labelA="Off"
+                labelB="On"
+              />
             </div>
             <div>
               <span>
-                <strong>SMS</strong>
-                <small>Requires an explicit provider adapter</small>
+                <strong id="notify-sms-label">SMS</strong>
+                <small>Preview follow-up alerts; Twilio required for external delivery</small>
               </span>
-              <Toggle id="notify-sms" labelA="Off" labelB="On" disabled />
+              <Toggle
+                aria-labelledby="notify-sms-label"
+                id="notify-sms"
+                labelA="Off"
+                labelB="On"
+                onToggle={setSmsPreview}
+                toggled={smsPreview}
+              />
             </div>
           </div>
         </section>
@@ -155,6 +181,7 @@ export default function NotificationSettingsPage() {
       <section
         className="panel panel--flush table-wrap"
         aria-labelledby="notification-history-title"
+        tabIndex={0}
       >
         <div className="panel__header" style={{ padding: '1.25rem' }}>
           <div>
@@ -183,6 +210,17 @@ export default function NotificationSettingsPage() {
               </td>
               <td>
                 <code>fu_amara:in_app:2026-07-10</code>
+              </td>
+            </tr>
+            <tr>
+              <td>Amara Okafor · follow-up due</td>
+              <td>SMS</td>
+              <td>Today, 8:30 AM</td>
+              <td>
+                <StatusBadge label="Preview recorded" status="attention" />
+              </td>
+              <td>
+                <code>fu_amara:sms-preview:2026-07-10</code>
               </td>
             </tr>
             <tr>

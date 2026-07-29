@@ -3,6 +3,10 @@ import { z } from 'zod';
 export const notificationIdentifierSchema = z.string().trim().min(1).max(200);
 export const notificationInstantSchema = z.string().datetime({ offset: true });
 export const localTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+export const e164PhoneNumberSchema = z
+  .string()
+  .trim()
+  .regex(/^\+[1-9]\d{7,14}$/, 'Phone number must use E.164 format');
 const safeActionUrlSchema = z
   .string()
   .trim()
@@ -41,15 +45,25 @@ export const internalNotificationSchema = z
     actionUrl: safeActionUrlSchema.nullable(),
     scheduledFor: notificationInstantSchema,
     deduplicationKey: notificationIdentifierSchema,
+    recipientPhone: e164PhoneNumberSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((notification, context) => {
+    if (notification.channel === 'SMS' && !notification.recipientPhone) {
+      context.addIssue({
+        code: 'custom',
+        message: 'SMS notifications require a verified recipient phone number',
+        path: ['recipientPhone'],
+      });
+    }
+  });
 
 export type QuietHours = z.infer<typeof quietHoursSchema>;
 export type InternalNotification = z.infer<typeof internalNotificationSchema>;
 export type NotificationChannel = InternalNotification['channel'];
 
 export interface NotificationDeliveryResult {
-  status: 'DELIVERED' | 'PREVIEWED' | 'FAILED';
+  status: 'ACCEPTED' | 'DELIVERED' | 'PREVIEWED' | 'FAILED';
   provider: string;
   attemptedAt: string;
   providerMessageId: string | null;

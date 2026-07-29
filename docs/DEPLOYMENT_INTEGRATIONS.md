@@ -7,7 +7,8 @@ Faro has three intentionally separate experiences:
 - **OAuth failure fallback:** the fictional Jordan Lee / Beacon Lab workspace, local Sheets fixture,
   `Demo draft` provenance, and notification previews.
 - **Connected:** a Google-authenticated tester gets an isolated empty PostgreSQL workspace and may
-  read an explicitly supplied spreadsheet with the read-only Sheets scope.
+  read an explicitly supplied spreadsheet, then write explicit contact edits to mapped source
+  cells.
 
 Faro never substitutes Jordan data for a failed connected request. A connected Bob request without
 persisted workspace context is rejected; an accepted request without Bob remains `AWAITING_BOB`.
@@ -50,8 +51,9 @@ requires re-encrypting or revoking existing Google credentials.
 6. Copy the client ID and client secret into the deployment secret manager.
 
 Faro requests `openid`, `email`, `profile`, and
-`https://www.googleapis.com/auth/spreadsheets.readonly`. The spreadsheet scope is sensitive; keep
-the OAuth app in testing with explicitly listed testers until verification is appropriate.
+`https://www.googleapis.com/auth/spreadsheets`. The spreadsheet scope is sensitive; keep the OAuth
+app in testing with explicitly listed testers until verification is appropriate. Gmail remains
+read-only.
 
 ```dotenv
 GOOGLE_CLIENT_ID="...apps.googleusercontent.com"
@@ -62,7 +64,8 @@ FARO_TESTER_EMAILS="tester-one@example.com,tester-two@example.com"
 
 After login, paste a spreadsheet URL/ID, exact worksheet tab, and a bounded A1 range on
 `/integrations/google-sheets`. Read and inspect the preview, then explicitly import it. Faro imports
-at most 5,000 rows into the tester's isolated workspace; write-back remains disabled.
+at most 5,000 rows into the tester's isolated workspace. Saving an imported contact writes only its
+mapped edits to its stored source row; polling does not write.
 
 For `SF Hacks 2027 Internal Sponsor Outreach Database - Feburary Event`, use:
 
@@ -128,6 +131,13 @@ local child process and is not a general multi-tenant network integration. Verif
 and its `IBM_BOB` provenance before describing the runtime as connected. Never expose the key to the
 browser or commit it.
 
+Configuration is not entitlement verification. Before a demo, confirm the IBM Bob plan is active
+and run one minimal `bob` request from the same environment as the web process. A suspended plan can
+surface in Faro as `BOB_SHELL_FAILED` because the adapter records a safe code instead of returning
+provider account details to the browser. Reactivate the plan, or replace an invalid/expired key and
+restart the app. Then create a new draft request; failed requests are terminal. See
+[local Bob Shell troubleshooting](IBM_BOB_WORKFLOW.md#troubleshoot-local-bob-shell).
+
 ## Preflight
 
 ```bash
@@ -140,4 +150,5 @@ pnpm build
 ```
 
 Check `/api/health`; `configured-unverified` means variables exist, not that Google or Bob accepted
-them. Complete an actual tester login and spreadsheet read before calling Google verified.
+them. Complete an actual tester login and spreadsheet read before calling Google verified. Complete
+one validated draft with `IBM_BOB` provenance before calling the Bob runtime verified.

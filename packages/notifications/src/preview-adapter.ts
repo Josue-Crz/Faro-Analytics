@@ -6,7 +6,7 @@ import {
   type InternalNotificationProvider,
   type NotificationChannel,
   type NotificationDeliveryResult,
-} from './contracts.js';
+} from './contracts';
 
 export interface PreviewDelivery {
   notification: InternalNotification;

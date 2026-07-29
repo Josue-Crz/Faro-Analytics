@@ -1,6 +1,7 @@
 import {
   nextAllowedNotificationAt,
   notificationRetryAt,
+  notificationScheduledAtOrAfter,
   type NotificationDispatcher,
 } from '@faro/notifications';
 
@@ -54,7 +55,7 @@ export class FaroWorker {
     for (const job of jobs) {
       const now = this.now();
       const scheduledFor = new Date(job.payload.scheduledFor);
-      const desiredAt = new Date(Math.max(now.getTime(), scheduledFor.getTime()));
+      const desiredAt = notificationScheduledAtOrAfter(scheduledFor, now);
       const eligibleAt = job.quietHours
         ? nextAllowedNotificationAt(desiredAt, job.quietHours)
         : desiredAt;

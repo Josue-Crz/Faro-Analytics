@@ -13,7 +13,17 @@ export async function POST(request: NextRequest) {
   if (!limit.allowed) return NextResponse.json({ error: 'RATE_LIMITED' }, { status: 429 });
   const connections = await prisma.sheetConnection.findMany({
     take: 10,
-    where: { workspaceId: session.workspaceId },
+    where: {
+      campaigns: session.focusedCampaignId
+        ? {
+            some: {
+              id: session.focusedCampaignId,
+              workspaceId: session.workspaceId,
+            },
+          }
+        : undefined,
+      workspaceId: session.workspaceId,
+    },
   });
   const results = [];
   for (const connection of connections) {

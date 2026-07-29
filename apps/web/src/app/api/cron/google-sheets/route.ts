@@ -17,10 +17,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'SYNC_CRON_NOT_CONFIGURED' }, { status: 503 });
   }
   if (!authorized(request)) return NextResponse.json({ error: 'UNAUTHORIZED' }, { status: 401 });
+  const staleAttemptStartedAt = new Date(Date.now() - 5 * 60_000);
   const connections = await prisma.sheetConnection.findMany({
     orderBy: { updatedAt: 'asc' },
     take: 25,
-    where: { status: { in: ['CONNECTED', 'SYNC_ISSUE'] } },
+    where: {
+      OR: [
+        { status: { in: ['CONNECTED', 'SYNC_ISSUE'] } },
+        { status: 'ATTEMPTING', updatedAt: { lt: staleAttemptStartedAt } },
+      ],
+    },
   });
   const results = [];
   for (const connection of connections) {

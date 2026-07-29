@@ -189,6 +189,9 @@ enum NotificationChannel {
 
 enum NotificationStatus {
   SCHEDULED
+  PROCESSING
+  ACCEPTED
+  DELIVERED
   SENT
   PREVIEWED
   FAILED
@@ -202,6 +205,7 @@ enum SheetSyncDirection {
 
 enum SheetConnectionStatus {
   CONNECTED
+  ATTEMPTING
   NEEDS_AUTH
   SYNC_ISSUE
   DISABLED
@@ -225,14 +229,14 @@ enum AuditActorType {
 }
 
 model Workspace {
-  id                String   @id
-  name              String
-  slug              String   @unique
-  defaultTimezone   String
-  quietHoursStart   String
-  quietHoursEnd     String
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id              String   @id
+  name            String
+  slug            String   @unique
+  defaultTimezone String
+  quietHoursStart String
+  quietHoursEnd   String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   memberships        Membership[]
   organizations      Organization[]
@@ -243,31 +247,35 @@ model Workspace {
   interactions       Interaction[]
   responses          Response[]
   recommendations    OutreachRecommendation[]
-  followUpTasks       FollowUpTask[]
-  bobRequests         BobGenerationRequest[]
-  bobDrafts           BobDraft[]
-  notifications       Notification[]
-  sheetConnections    SheetConnection[]
-  sheetFieldMappings  SheetFieldMapping[]
-  sheetSyncRuns       SheetSyncRun[]
-  auditEvents         AuditEvent[]
+  followUpTasks      FollowUpTask[]
+  bobRequests        BobGenerationRequest[]
+  bobDrafts          BobDraft[]
+  notifications      Notification[]
+  sheetConnections   SheetConnection[]
+  sheetFieldMappings SheetFieldMapping[]
+  sheetSyncRuns      SheetSyncRun[]
+  auditEvents        AuditEvent[]
 }
 
 model User {
-  id                      String   @id
+  id                      String    @id
   name                    String
-  email                   String   @unique
+  email                   String    @unique
   timezone                String
-  notificationPreferences Json     @default("{}")
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  notificationPreferences Json      @default("{}")
+  smsPhone                String?
+  smsVerifiedAt           DateTime?
+  smsConsentAt            DateTime?
+  smsOptedOutAt           DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   memberships              Membership[]
   contactsOwned            Contact[]              @relation("ContactOwner")
   campaignsOwned           Campaign[]             @relation("CampaignOwner")
   campaignContactsAssigned CampaignContact[]      @relation("CampaignContactAssignee")
   responsesReviewed        Response[]             @relation("ResponseReviewer")
-  followUpsAssigned        FollowUpTask[]          @relation("FollowUpAssignee")
+  followUpsAssigned        FollowUpTask[]         @relation("FollowUpAssignee")
   bobRequestsRequested     BobGenerationRequest[] @relation("BobRequestor")
   bobDraftsApproved        BobDraft[]             @relation("BobDraftApprover")
   notifications            Notification[]
@@ -275,30 +283,33 @@ model User {
 }
 
 model GoogleCredential {
-  id                    String   @id
-  userId                String   @unique
+  id                    String    @id
+  userId                String    @unique
   encryptedAccessToken  String
   encryptedRefreshToken String?
   grantedScopes         String
   accessTokenExpiresAt  DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Membership {
-  workspaceId String
-  userId      String
-  role        WorkspaceRole
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  workspaceId       String
+  userId            String
+  focusedCampaignId String?
+  role              WorkspaceRole
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  focusedCampaign Campaign? @relation("FocusedCampaign", fields: [focusedCampaignId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([workspaceId, userId])
   @@index([userId])
+  @@index([workspaceId, focusedCampaignId])
 }
 
 model SponsorshipPipelineStage {
@@ -320,29 +331,30 @@ model SponsorshipPipelineStage {
 }
 
 model Organization {
-  id                   String           @id
-  workspaceId          String
-  sponsorshipStageId   String?
-  name                 String
-  type                 OrganizationType
-  industry             String?
-  website              String?
-  estimatedValue       Int              @default(0)
-  interestAreas        String[]         @default([])
-  tags                 String[]         @default([])
-  customFields         Json             @default("{}")
-  externalId           String?
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
-  deletedAt            DateTime?
+  id                 String           @id
+  workspaceId        String
+  sponsorshipStageId String?
+  name               String
+  type               OrganizationType
+  industry           String           @default("Other")
+  website            String?
+  estimatedValue     Int              @default(0)
+  interestAreas      String[]         @default([])
+  tags               String[]         @default([])
+  customFields       Json             @default("{}")
+  externalId         String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  deletedAt          DateTime?
 
-  workspace        Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sponsorshipStage SponsorshipPipelineStage? @relation(fields: [sponsorshipStageId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   contacts         Contact[]
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, externalId])
   @@index([workspaceId, name])
+  @@index([workspaceId, industry])
   @@index([workspaceId, sponsorshipStageId])
 }
 
@@ -350,28 +362,28 @@ model Contact {
   id               String         @id
   workspaceId      String
   organizationId   String?
-  ownerId           String?
-  type              ContactType
-  firstName         String
-  lastName          String
-  email             String?
-  phone             String?
-  title             String?
-  timezone          String
-  preferredChannel  ContactChannel
-  source            String?
-  tags              String[]       @default([])
-  customFields      Json           @default("{}")
-  consentStatus     ConsentStatus  @default(UNKNOWN)
-  suppressedAt      DateTime?
-  externalId        String?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
-  deletedAt         DateTime?
+  ownerId          String?
+  type             ContactType
+  firstName        String
+  lastName         String
+  email            String?
+  phone            String?
+  title            String?
+  timezone         String
+  preferredChannel ContactChannel
+  source           String?
+  tags             String[]       @default([])
+  customFields     Json           @default("{}")
+  consentStatus    ConsentStatus  @default(UNKNOWN)
+  suppressedAt     DateTime?
+  externalId       String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
 
-  workspace       Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  organization    Organization?            @relation(fields: [organizationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  owner           User?                    @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  workspace        Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  organization     Organization?            @relation(fields: [organizationId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  owner            User?                    @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   campaignContacts CampaignContact[]
   interactions     Interaction[]
   recommendations  OutreachRecommendation[]
@@ -387,46 +399,50 @@ model Contact {
 }
 
 model Campaign {
-  id             String         @id
-  workspaceId    String
-  name           String
-  description    String
-  type           CampaignType
-  objective      String
-  status         CampaignStatus @default(DRAFT)
-  ownerId        String
-  startAt        DateTime?
-  endAt          DateTime?
-  defaultTone    OutreachTone
-  quietHours     Json           @default("{}")
-  idempotencyKey String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  archivedAt     DateTime?
+  id                String         @id
+  workspaceId       String
+  sheetConnectionId String?
+  name              String
+  description       String
+  type              CampaignType
+  objective         String
+  status            CampaignStatus @default(DRAFT)
+  ownerId           String
+  startAt           DateTime?
+  endAt             DateTime?
+  defaultTone       OutreachTone
+  quietHours        Json           @default("{}")
+  idempotencyKey    String?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  archivedAt        DateTime?
 
-  workspace        Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  owner            User                     @relation("CampaignOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  campaignContacts CampaignContact[]
-  interactions     Interaction[]
-  recommendations  OutreachRecommendation[]
-  followUpTasks    FollowUpTask[]
-  bobRequests      BobGenerationRequest[]
+  workspace          Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sheetConnection    SheetConnection?         @relation(fields: [sheetConnectionId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  owner              User                     @relation("CampaignOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  campaignContacts   CampaignContact[]
+  interactions       Interaction[]
+  recommendations    OutreachRecommendation[]
+  followUpTasks      FollowUpTask[]
+  bobRequests        BobGenerationRequest[]
+  focusedMemberships Membership[]             @relation("FocusedCampaign")
 
   @@unique([id, workspaceId])
   @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, status, startAt])
+  @@index([workspaceId, sheetConnectionId])
 }
 
 model CampaignContact {
-  workspaceId   String
-  campaignId    String
-  contactId     String
-  stage         String
-  priority      Priority
+  workspaceId    String
+  campaignId     String
+  contactId      String
+  stage          String
+  priority       Priority
   assignedUserId String?
-  nextActionAt  DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  nextActionAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   campaign     Campaign  @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -453,9 +469,9 @@ model Interaction {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  campaign  Campaign?  @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
-  contact   Contact    @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  Campaign? @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
+  contact   Contact   @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
   response  Response?
 
   @@unique([id, workspaceId])
@@ -466,26 +482,26 @@ model Interaction {
 }
 
 model Response {
-  id                         String                  @id
-  workspaceId                String
-  interactionId              String
-  classification             ResponseClassification
-  proposedClassification     ResponseClassification?
-  sentiment                  Sentiment
-  proposedSentiment          Sentiment?
-  urgency                    Urgency
-  proposedUrgency            Urgency?
-  responseTimeMinutes        Int
-  keyQuestion                String?
-  recommendedNextAction      String?
-  suggestedFollowUpAt        DateTime?
-  humanReviewed              Boolean                 @default(false)
-  reviewedById               String?
-  reviewedAt                 DateTime?
-  analysisProvenance         AnalysisProvenance
-  structuredMetadata         Json                    @default("{}")
-  createdAt                  DateTime                @default(now())
-  updatedAt                  DateTime                @updatedAt
+  id                     String                  @id
+  workspaceId            String
+  interactionId          String
+  classification         ResponseClassification
+  proposedClassification ResponseClassification?
+  sentiment              Sentiment
+  proposedSentiment      Sentiment?
+  urgency                Urgency
+  proposedUrgency        Urgency?
+  responseTimeMinutes    Int
+  keyQuestion            String?
+  recommendedNextAction  String?
+  suggestedFollowUpAt    DateTime?
+  humanReviewed          Boolean                 @default(false)
+  reviewedById           String?
+  reviewedAt             DateTime?
+  analysisProvenance     AnalysisProvenance
+  structuredMetadata     Json                    @default("{}")
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
 
   workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   interaction Interaction @relation(fields: [interactionId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
@@ -497,30 +513,30 @@ model Response {
 }
 
 model OutreachRecommendation {
-  id                    String               @id
-  workspaceId           String
-  campaignId            String
-  contactId             String
-  recommendedAt         DateTime
-  alternativeWindows    DateTime[]
-  confidence            Float
-  score                 Float
-  dataSufficiency       DataSufficiency
-  reasonCodes           String[]             @default([])
-  explanation           String
-  algorithmVersion      String
-  status                RecommendationStatus @default(PROPOSED)
-  acceptedAt            DateTime?
-  userAdjustedAt        DateTime?
-  dismissedAt           DateTime?
-  outcomeImproved       Boolean?
-  idempotencyKey        String
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
+  id                 String               @id
+  workspaceId        String
+  campaignId         String
+  contactId          String
+  recommendedAt      DateTime
+  alternativeWindows DateTime[]
+  confidence         Float
+  score              Float
+  dataSufficiency    DataSufficiency
+  reasonCodes        String[]             @default([])
+  explanation        String
+  algorithmVersion   String
+  status             RecommendationStatus @default(PROPOSED)
+  acceptedAt         DateTime?
+  userAdjustedAt     DateTime?
+  dismissedAt        DateTime?
+  outcomeImproved    Boolean?
+  idempotencyKey     String
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  campaign  Campaign  @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
-  contact   Contact   @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  workspace Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaign  Campaign       @relation(fields: [campaignId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  contact   Contact        @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
   followUps FollowUpTask[]
 
   @@unique([id, workspaceId])
@@ -564,26 +580,26 @@ model FollowUpTask {
 }
 
 model BobGenerationRequest {
-  id               String              @id
-  workspaceId      String
-  contactId        String
-  campaignId       String
-  followUpTaskId   String?
-  type             BobGenerationType
-  promptVersion    String
-  promptText       String              @default("")
-  approvedSourceRecordIds String[]      @default([])
-  contextVersion   Int                 @default(1)
-  status           BobGenerationStatus @default(AWAITING_BOB)
-  requestedById    String
-  requestedAt      DateTime            @default(now())
-  startedAt        DateTime?
-  completedAt      DateTime?
-  errorCode        String?
-  errorMessage     String?
-  idempotencyKey   String
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  id                      String              @id
+  workspaceId             String
+  contactId               String
+  campaignId              String
+  followUpTaskId          String?
+  type                    BobGenerationType
+  promptVersion           String
+  promptText              String              @default("")
+  approvedSourceRecordIds String[]            @default([])
+  contextVersion          Int                 @default(1)
+  status                  BobGenerationStatus @default(AWAITING_BOB)
+  requestedById           String
+  requestedAt             DateTime            @default(now())
+  startedAt               DateTime?
+  completedAt             DateTime?
+  errorCode               String?
+  errorMessage            String?
+  idempotencyKey          String
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 
   workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact      Contact       @relation(fields: [contactId, workspaceId], references: [id, workspaceId], onDelete: Restrict)
@@ -629,22 +645,26 @@ model BobDraft {
 }
 
 model Notification {
-  id               String             @id
-  workspaceId      String
-  userId           String
-  followUpTaskId   String?
-  channel          NotificationChannel
-  status           NotificationStatus
-  title            String
-  message          String
-  payload          Json               @default("{}")
-  scheduledFor     DateTime
-  sentAt           DateTime?
-  deduplicationKey String
+  id                String              @id
+  workspaceId       String
+  userId            String
+  followUpTaskId    String?
+  channel           NotificationChannel
+  status            NotificationStatus
+  title             String
+  message           String
+  payload           Json                @default("{}")
+  scheduledFor      DateTime
+  sentAt            DateTime?
+  deduplicationKey  String
+  provider          String?
   providerMessageId String?
-  errorCode        String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  errorCode         String?
+  attempts          Int                 @default(0)
+  lastAttemptAt     DateTime?
+  readAt            DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
   workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -653,6 +673,7 @@ model Notification {
   @@unique([workspaceId, deduplicationKey])
   @@unique([id, workspaceId])
   @@index([workspaceId, userId, status, scheduledFor])
+  @@index([status, scheduledFor, lastAttemptAt])
 }
 
 model SheetConnection {
@@ -665,7 +686,7 @@ model SheetConnection {
   displayName         String
   syncDirection       SheetSyncDirection
   schedule            String?
-  syncCursor           String?
+  syncCursor          String?
   credentialReference String?
   writeBackEnabled    Boolean               @default(false)
   lastSyncedAt        DateTime?
@@ -676,6 +697,7 @@ model SheetConnection {
   updatedAt           DateTime              @updatedAt
 
   workspace     Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  campaigns     Campaign[]
   fieldMappings SheetFieldMapping[]
   syncRuns      SheetSyncRun[]
 
@@ -708,6 +730,7 @@ model SheetSyncRun {
   workspaceId       String
   sheetConnectionId String
   status            SheetSyncStatus
+  trigger           String          @default("MANUAL_IMPORT")
   startedAt         DateTime
   completedAt       DateTime?
   rowsRead          Int             @default(0)
@@ -729,6 +752,7 @@ model SheetSyncRun {
   @@unique([id, workspaceId])
   @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, sheetConnectionId, startedAt])
+  @@index([workspaceId, sheetConnectionId, trigger, startedAt])
 }
 
 model AuditEvent {

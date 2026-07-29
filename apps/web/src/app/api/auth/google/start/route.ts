@@ -25,7 +25,7 @@ export function GET(request: NextRequest) {
       'openid',
       'email',
       'profile',
-      'https://www.googleapis.com/auth/spreadsheets.readonly',
+      'https://www.googleapis.com/auth/spreadsheets',
       'https://www.googleapis.com/auth/gmail.readonly',
     ].join(' '),
     state,

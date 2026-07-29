@@ -34,7 +34,8 @@ workspace, expiration, and an explicit read/write permission set.
 
 1. Install IBM Bob Shell using IBM's documented installation flow and confirm that the `bob`
    command is available locally.
-2. Create an active IBM Bob **Inference** API key. This is separate from an IDE MCP configuration.
+2. Confirm the IBM Bob plan/entitlement is active, then create an **Inference** API key. The key is
+   separate from an IDE MCP configuration, and key presence alone does not prove the plan is active.
 3. Add the following only to the ignored repository-root `.env`:
 
    ```dotenv
@@ -50,6 +51,40 @@ The adapter never passes a shell string, never asks Bob to send a message, and d
 as a successful result. Missing installation or credentials, authentication failure, timeout,
 non-zero exit, and invalid JSON/schema output are recorded as safe failure codes. To return to the
 MCP-first workflow, set `BOB_RUNTIME_ADAPTER="unavailable"` and restart the server.
+
+## Troubleshoot local Bob Shell
+
+Faro intentionally returns safe error codes instead of forwarding Bob Shell stderr into the
+browser, because provider diagnostics may contain account or environment details.
+
+| Faro error                 | Meaning                                               | Check                                                                 |
+| -------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------- |
+| `BOB_SHELL_KEY_MISSING`    | No usable `BOBSHELL_API_KEY` reached the web process. | Set it in the ignored root `.env`, then restart `pnpm dev`.           |
+| `BOB_SHELL_NOT_INSTALLED`  | The web process could not start `bob`.                | Run `command -v bob` and `bob --version` in the server environment.   |
+| `BOB_SHELL_AUTH_FAILED`    | Bob reported a recognized authentication failure.     | Replace an invalid/expired Inference key and restart the web process. |
+| `BOB_SHELL_FAILED`         | Bob Shell started but exited non-zero.                | Run the direct diagnostic below and inspect its safe terminal output. |
+| `BOB_SHELL_TIMEOUT`        | Bob did not finish within two minutes.                | Check connectivity and retry one new request.                         |
+| `BOB_SHELL_INVALID_RESULT` | Output was not valid JSON or failed Faro validation.  | Keep the schema-only prompt and inspect Bob output outside Faro.      |
+
+To diagnose `BOB_SHELL_FAILED`, run a minimal Bob request from the same repository and shell that
+starts Faro:
+
+```bash
+bob --chat-mode ask --hide-intermediary-output --max-coins 2 \
+  -p "Reply with exactly OK and do not use tools."
+```
+
+This invokes IBM Bob and may consume a small amount of the plan's entitlement. A suspended plan can
+return a message directing the account owner to update the subscription; Faro records only the safe
+generic code. Reactivate or update the plan through the
+[IBM dashboard](https://myibm.ibm.com/dashboard), or review
+[IBM Bob plans](https://bob.ibm.com/pricing). For an enterprise plan, contact the organization
+administrator or IBM representative responsible for its entitlement.
+
+If IBM issues a replacement key, update `BOBSHELL_API_KEY` and restart `pnpm dev`. If the same
+key/plan is reactivated, a restart is unnecessary. Failed generation requests are terminal, so
+click **Request IBM Bob draft** again to create a new governed request after the account is active.
+Never paste the key into logs, issues, screenshots, or support messages.
 
 ## Review pending requests
 

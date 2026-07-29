@@ -1,13 +1,32 @@
 'use client';
 
-import { Add, ArrowRight, Calendar } from '@carbon/icons-react';
+import { Add, ArrowRight, Calendar, Search } from '@carbon/icons-react';
 import { Button, ProgressBar } from '@carbon/react';
 import Link from 'next/link';
+import { useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/PageHeader';
-import { campaigns } from '@/lib/demo-data';
+import { COMPANY_CATEGORIES } from '@faro/core';
+import { campaigns, contacts } from '@/lib/demo-data';
 
 export default function CampaignsPage() {
+  const [industry, setIndustry] = useState('All categories');
+  const [query, setQuery] = useState('');
+  const visibleCampaigns = useMemo(
+    () =>
+      campaigns.filter((campaign) => {
+        const campaignIndustries = contacts
+          .filter((contact) => contact.campaign === campaign.name)
+          .map((contact) => contact.industry);
+        return (
+          `${campaign.name} ${campaign.objective} ${campaign.owner}`
+            .toLocaleLowerCase('en-US')
+            .includes(query.toLocaleLowerCase('en-US')) &&
+          (industry === 'All categories' || campaignIndustries.includes(industry))
+        );
+      }),
+    [industry, query],
+  );
   return (
     <div className="page-shell">
       <PageHeader
@@ -21,8 +40,34 @@ export default function CampaignsPage() {
         title="Campaigns"
       />
 
+      <div className="filters-bar" aria-label="Campaign search filters">
+        <div className="filters-bar__group">
+          <label className="search-field">
+            <span className="visually-hidden">Search campaigns</span>
+            <Search aria-hidden size={16} />
+            <input
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search campaign, objective, or owner"
+              type="search"
+              value={query}
+            />
+          </label>
+          <select
+            aria-label="Filter campaigns by contact company category"
+            className="filter-select"
+            onChange={(event) => setIndustry(event.target.value)}
+            value={industry}
+          >
+            <option>All categories</option>
+            {COMPANY_CATEGORIES.map((item) => (
+              <option key={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
       <div className="campaign-grid">
-        {campaigns.map((campaign) => (
+        {visibleCampaigns.map((campaign) => (
           <article className="campaign-card" key={campaign.id}>
             <div className="campaign-card__topline">
               <span className="faro-tag">{campaign.type}</span>
@@ -86,6 +131,13 @@ export default function CampaignsPage() {
             </footer>
           </article>
         ))}
+        {!visibleCampaigns.length ? (
+          <div className="panel empty-state">
+            <Search size={40} />
+            <h2>No campaigns match</h2>
+            <p>Try another campaign search or company category.</p>
+          </div>
+        ) : null}
       </div>
     </div>
   );

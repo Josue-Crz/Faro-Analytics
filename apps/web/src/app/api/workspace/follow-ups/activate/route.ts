@@ -5,6 +5,7 @@ import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { sessionFromRequest } from '@/lib/server/auth';
+import { campaignContactSourceWhere } from '@/lib/server/campaign-data-source';
 
 const requestSchema = z.object({ campaignId: z.string().trim().min(1).max(160) });
 
@@ -13,13 +14,24 @@ export async function POST(request: NextRequest) {
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_CAMPAIGN' }, { status: 400 });
+  if (session.focusedCampaignId && session.focusedCampaignId !== parsed.data.campaignId) {
+    return NextResponse.json({ error: 'WORKSPACE_FOCUS_CONFLICT' }, { status: 409 });
+  }
   const campaign = await prisma.campaign.findFirst({
+    select: { id: true, sheetConnectionId: true, status: true },
     where: { archivedAt: null, id: parsed.data.campaignId, workspaceId: session.workspaceId },
   });
   if (!campaign) return NextResponse.json({ error: 'CAMPAIGN_NOT_FOUND' }, { status: 404 });
+  if (campaign.status === 'COMPLETED') {
+    return NextResponse.json({ error: 'CAMPAIGN_COMPLETED' }, { status: 409 });
+  }
   const contacts = await prisma.contact.findMany({
     select: { customFields: true, id: true },
-    where: { deletedAt: null, workspaceId: session.workspaceId },
+    where: {
+      ...campaignContactSourceWhere(campaign.sheetConnectionId),
+      deletedAt: null,
+      workspaceId: session.workspaceId,
+    },
   });
   let activated = 0;
   await prisma.$transaction(async (database) => {
@@ -73,7 +85,7 @@ export async function POST(request: NextRequest) {
             importedFollowUpPending: false,
           },
         },
-        where: { id: contact.id },
+        where: { id: contact.id, workspaceId: session.workspaceId },
       });
       activated += 1;
     }

@@ -11,6 +11,9 @@ const actionSchema = z.object({ action: z.enum(['trash', 'restore']) });
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await sessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
+  if (session.focusedCampaignId) {
+    return NextResponse.json({ error: 'MAIN_WORKSPACE_REQUIRED' }, { status: 409 });
+  }
   const parsed = actionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json({ error: 'INVALID_ORGANIZATION_ACTION' }, { status: 400 });

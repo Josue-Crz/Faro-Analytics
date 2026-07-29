@@ -13,7 +13,8 @@ owners must complete the credentials-required items before handling real persona
 - Suppression/opt-out blocks optimizer and prompt creation before scoring or generation.
 - Bob context is minimized; OAuth/session secrets and unrelated records are excluded.
 - Notification, generation, sheet sync, and job types carry idempotency/deduplication keys.
-- Sheet write-back neutralizes formula prefixes and is disabled by default.
+- Sheet write-back runs only for explicit authenticated contact edits, is restricted to the stored
+  connection/source row and mapped fields, neutralizes formula prefixes, and is audited.
 - HTTP responses add clickjacking, MIME-sniffing, referrer, and permissions-policy headers.
 - Sensitive generation/preview routes have a simple process-local development rate limiter.
 - Database-mode demo routes fail closed unless the local-only

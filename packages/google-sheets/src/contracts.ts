@@ -24,6 +24,7 @@ export const contactFieldSchema = z.enum([
   'preferredChannel',
   'type',
   'organizationName',
+  'organizationIndustry',
   'externalId',
   'tags',
   'consentStatus',

@@ -3,8 +3,8 @@ import {
   type InternalNotification,
   type InternalNotificationProvider,
   type NotificationDeliveryResult,
-} from './contracts.js';
-import type { NotificationDeduplicator } from './deduplication.js';
+} from './contracts';
+import type { NotificationDeduplicator } from './deduplication';
 
 export interface NotificationAuditEvent {
   workspaceId: string;

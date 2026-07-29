@@ -4,9 +4,11 @@ import { Download, Information, Renew } from '@carbon/icons-react';
 import { Button, ProgressBar } from '@carbon/react';
 import dynamic from 'next/dynamic';
 
+import { CampaignPulseChart } from '@/components/CampaignPulseChart';
+import { CompanyCategoryGraph } from '@/components/CompanyCategoryGraph';
 import { MetricCard } from '@/components/MetricCard';
 import { PageHeader } from '@/components/PageHeader';
-import { campaigns, heatmap, responseFunnel } from '@/lib/demo-data';
+import { campaigns, heatmap, organizations, responseFunnel } from '@/lib/demo-data';
 
 const ResponseTrendChart = dynamic(
   () => import('@/components/ResponseTrendChart').then((module) => module.ResponseTrendChart),
@@ -67,14 +69,36 @@ export default function AnalyticsPage() {
         }
         description="Understand which outreach earns meaningful responses, where follow-up converts, and how the sponsorship pipeline is moving."
         eyebrow="Jun 11 – Jul 10, 2026 · All campaigns"
-        title="Analytics"
+        title="Analytics (Soon)"
       />
 
-      <section className="metric-grid metric-grid--compact" aria-label="Analytics summary">
+      <section className="metric-grid metric-grid--compact" aria-label="Analytics (Soon) summary">
         {analyticsMetrics.map((metric) => (
           <MetricCard {...metric} key={metric.label} />
         ))}
       </section>
+
+      <CampaignPulseChart
+        campaigns={campaigns.map((campaign) => ({
+          contacts: campaign.contacts,
+          followUpsOpen: campaign.due,
+          href: `/campaigns/${campaign.id}`,
+          id: campaign.id,
+          name: campaign.name,
+          positiveResponseRate: campaign.positiveRate,
+          responseRate: campaign.responseRate,
+        }))}
+      />
+
+      <CompanyCategoryGraph
+        companies={organizations.map((organization) => ({
+          contacts: organization.contacts,
+          href: `/contacts?organization=${organization.id}`,
+          id: organization.id,
+          industry: organization.industry,
+          name: organization.name,
+        }))}
+      />
 
       <div className="dashboard-grid">
         <section className="panel" aria-labelledby="analytics-trend-title">
@@ -119,7 +143,7 @@ export default function AnalyticsPage() {
         </section>
       </div>
 
-      <div className="dashboard-grid dashboard-grid--equal">
+      <div className="dashboard-grid">
         <section className="panel" aria-labelledby="analytics-heatmap-title">
           <div className="panel__header">
             <div>
@@ -160,41 +184,41 @@ export default function AnalyticsPage() {
             enforce consent, quiet hours, frequency, timezone, and campaign urgency.
           </p>
         </section>
-        <section className="panel" aria-labelledby="campaign-compare-title">
+        <section className="panel analytics-guide" aria-labelledby="analytics-guide-title">
           <div className="panel__header">
             <div>
-              <h2 id="campaign-compare-title">Campaign comparison</h2>
-              <p>Response and positive-response rate</p>
+              <p className="eyebrow">A quick way to read the data</p>
+              <h2 id="analytics-guide-title">From graph to next step</h2>
+              <p>You do not need to be a data analyst to use this page.</p>
             </div>
           </div>
-          <div className="comparison-list">
-            {campaigns.map((campaign) => (
-              <div className="comparison-row" key={campaign.id}>
-                <div>
-                  <strong>{campaign.name}</strong>
-                  <span className="mono">{campaign.responseRate}%</span>
-                </div>
-                <div className="comparison-bars">
-                  <span
-                    style={{ width: `${campaign.responseRate}%` }}
-                    title={`${campaign.responseRate}% response`}
-                  />
-                  <span
-                    style={{ width: `${campaign.positiveRate}%` }}
-                    title={`${campaign.positiveRate}% positive`}
-                  />
-                </div>
+          <ol>
+            <li>
+              <span>1</span>
+              <div>
+                <strong>Start with a question</strong>
+                <p>
+                  Use the campaign pulse buttons instead of trying to read every metric at once.
+                </p>
               </div>
-            ))}
-          </div>
-          <div className="legend-inline">
-            <span>
-              <i className="legend-response" /> Response
-            </span>
-            <span>
-              <i className="legend-positive" /> Positive
-            </span>
-          </div>
+            </li>
+            <li>
+              <span>2</span>
+              <div>
+                <strong>Check the selected campaign</strong>
+                <p>Compare audience size, replies, positive intent, and work still waiting.</p>
+              </div>
+            </li>
+            <li>
+              <span>3</span>
+              <div>
+                <strong>Take one next step</strong>
+                <p>
+                  Open the campaign or follow-up queue; every outreach action still needs review.
+                </p>
+              </div>
+            </li>
+          </ol>
         </section>
       </div>
 

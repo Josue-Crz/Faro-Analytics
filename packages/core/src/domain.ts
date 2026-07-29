@@ -93,6 +93,7 @@ export interface Contact {
 export interface Campaign {
   id: string;
   workspaceId: string;
+  sheetConnectionId?: string | null;
   name: string;
   description: string;
   type:
@@ -243,7 +244,7 @@ export interface SheetConnection {
   syncDirection: 'IMPORT' | 'BIDIRECTIONAL';
   schedule: string;
   lastSyncedAt: IsoDateTime | null;
-  status: 'CONNECTED' | 'NEEDS_AUTH' | 'SYNC_ISSUE' | 'DISABLED';
+  status: 'CONNECTED' | 'ATTEMPTING' | 'NEEDS_AUTH' | 'SYNC_ISSUE' | 'DISABLED';
   writeBackEnabled: boolean;
 }
 
@@ -252,6 +253,7 @@ export interface SheetSyncRun {
   workspaceId: string;
   sheetConnectionId: string;
   status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'PARTIAL' | 'FAILED' | 'DRY_RUN';
+  trigger: 'MANUAL_IMPORT' | 'MANUAL_REFRESH' | 'AUTOMATIC_POLL' | 'OAUTH_RECONNECT';
   startedAt: IsoDateTime;
   completedAt: IsoDateTime | null;
   rowsRead: number;
@@ -269,7 +271,15 @@ export interface NotificationRecord {
   userId: string;
   followUpTaskId: string | null;
   channel: 'IN_APP' | 'EMAIL' | 'WEB_PUSH' | 'SMS';
-  status: 'SCHEDULED' | 'SENT' | 'PREVIEWED' | 'FAILED' | 'CANCELLED';
+  status:
+    | 'SCHEDULED'
+    | 'PROCESSING'
+    | 'ACCEPTED'
+    | 'DELIVERED'
+    | 'SENT'
+    | 'PREVIEWED'
+    | 'FAILED'
+    | 'CANCELLED';
   scheduledFor: IsoDateTime;
   sentAt: IsoDateTime | null;
   deduplicationKey: string;
@@ -391,7 +401,7 @@ export interface IntegrationStatus {
   };
   googleSheets: {
     oauthConfigured: boolean;
-    status: 'DEMO_DATA' | 'CONNECTED' | 'NEEDS_AUTH' | 'SYNC_ISSUE';
+    status: 'DEMO_DATA' | 'CONNECTED' | 'ATTEMPTING' | 'NEEDS_AUTH' | 'SYNC_ISSUE';
     lastSyncedAt: IsoDateTime | null;
     nextScheduledSyncAt: IsoDateTime | null;
     actionRequired: string;

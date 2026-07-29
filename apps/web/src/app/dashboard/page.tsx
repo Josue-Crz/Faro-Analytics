@@ -55,23 +55,62 @@ export default function DashboardPage() {
         <PageHeader
           actions={
             <Button href="/api/auth/google/start?returnTo=/integrations/google-sheets">
-              Connect Google account
+              Create connected workspace
             </Button>
           }
-          description="Connect Google to create a private workspace. Contacts, organizations, campaigns, and follow-ups begin empty."
-          eyebrow="New workspace"
-          title="Welcome to Faro"
+          description="Bring governed relationship context together, let Faro identify the next action, and keep every draft under human review."
+          eyebrow="Faro relationship intelligence"
+          title="Turn outreach into a clear next action"
         />
         <InlineNotification
           hideCloseButton
           kind="info"
           lowContrast
-          title="No fictional records are loaded"
-          subtitle="The Jordan Lee preview appears only after an OAuth failure. Successful authentication opens an empty connected workspace."
+          title="Your workspace starts empty"
+          subtitle="No fictional contacts or campaigns are mixed into a connected workspace. Google creates a private workspace for the signed-in tester."
         />
+        <section className="dashboard-onboarding" aria-labelledby="dashboard-onboarding-title">
+          <div className="dashboard-onboarding__intro">
+            <p className="eyebrow">One governed decision loop</p>
+            <h2 id="dashboard-onboarding-title">Know who needs you next—and why.</h2>
+            <p>
+              Faro connects relationship context, deterministic timing, and human-reviewed drafting
+              so teams can act with clarity without automating the relationship away.
+            </p>
+          </div>
+          <ol className="dashboard-onboarding__steps">
+            <li>
+              <span>01</span>
+              <div>
+                <strong>Bring context together</strong>
+                <p>Import selected Sheet data and bounded Gmail history into one workspace.</p>
+              </div>
+            </li>
+            <li>
+              <span>02</span>
+              <div>
+                <strong>Read the relationship signal</strong>
+                <p>See urgency, campaign context, consent, and recipient-local timing together.</p>
+              </div>
+            </li>
+            <li>
+              <span>03</span>
+              <div>
+                <strong>Keep the person in control</strong>
+                <p>Review IBM Bob drafts and approve separately from any external delivery.</p>
+              </div>
+            </li>
+          </ol>
+        </section>
       </div>
     );
-  const openFollowUps = followUps.filter((item) => item.dueGroup !== 'Completed').slice(0, 4);
+  const dueOrder = { Overdue: 0, Today: 1, Upcoming: 2, Snoozed: 3, Completed: 4 };
+  const openFollowUps = followUps
+    .filter((item) => item.dueGroup !== 'Completed')
+    .sort((left, right) => dueOrder[left.dueGroup] - dueOrder[right.dueGroup])
+    .slice(0, 4);
+  const priorityFollowUp =
+    openFollowUps.find((item) => item.dueGroup === 'Overdue') ?? openFollowUps[0];
 
   return (
     <div className="page-shell">
@@ -79,29 +118,87 @@ export default function DashboardPage() {
         actions={
           <>
             <Button href="/analytics" kind="secondary" renderIcon={SettingsAdjust}>
-              Explore analytics
+              Read performance
             </Button>
             <Button href="/follow-ups" renderIcon={ArrowRight}>
-              Work follow-ups
+              Review follow-ups
             </Button>
           </>
         }
-        description="A clear view of response signals, outreach timing, sponsorship momentum, and the work that needs your attention."
-        eyebrow="Signal overview · Last 30 days"
-        title="Good morning, Jordan"
+        description="Faro turns relationship context into a next action, then keeps the evidence, timing, and human review close at hand."
+        eyebrow="Faro signal · Fictional demo"
+        title="Know who needs you next"
       />
 
-      <section aria-label="Key outreach metrics" className="metric-grid">
+      {priorityFollowUp ? (
+        <section className="action-brief" aria-labelledby="priority-action-title">
+          <div className="action-brief__main">
+            <p className="eyebrow">Priority signal · {priorityFollowUp.due}</p>
+            <h2 id="priority-action-title">{priorityFollowUp.nextAction}</h2>
+            <p>
+              {priorityFollowUp.contact} · {priorityFollowUp.organization} ·{' '}
+              {priorityFollowUp.reason}
+            </p>
+          </div>
+          <div className="action-brief__context">
+            <dl className="action-brief__facts">
+              <div>
+                <dt>Campaign</dt>
+                <dd>{priorityFollowUp.campaign}</dd>
+              </div>
+              <div>
+                <dt>Best window</dt>
+                <dd>{priorityFollowUp.recommendedWindow}</dd>
+              </div>
+              <div>
+                <dt>Company · category</dt>
+                <dd>
+                  {priorityFollowUp.organization} · {priorityFollowUp.industry}
+                </dd>
+              </div>
+              <div>
+                <dt>Confidence</dt>
+                <dd>
+                  {priorityFollowUp.confidence}% · {priorityFollowUp.sufficiency} evidence
+                </dd>
+              </div>
+            </dl>
+            <div className="action-brief__rationale">
+              <strong>Why Faro surfaced this</strong>
+              <p>{priorityFollowUp.explanation}</p>
+            </div>
+          </div>
+          <Button href={`/follow-ups?task=${priorityFollowUp.id}`} renderIcon={ArrowRight}>
+            Review this follow-up
+          </Button>
+        </section>
+      ) : null}
+
+      <div className="dashboard-section-heading">
+        <div>
+          <p className="eyebrow">Decision horizon</p>
+          <h2>What needs movement today</h2>
+          <p>Work state comes before aggregate performance.</p>
+        </div>
+      </div>
+      <section aria-label="Immediate outreach metrics" className="metric-grid metric-grid--compact">
         {dashboardMetrics.map((metric) => (
           <MetricCard {...metric} key={metric.label} />
         ))}
       </section>
 
+      <div className="dashboard-section-heading">
+        <div>
+          <p className="eyebrow">Relationship momentum</p>
+          <h2>Use the signal to support the decision</h2>
+          <p>Response movement and the open queue explain where attention is paying off.</p>
+        </div>
+      </div>
       <div className="dashboard-grid">
         <section className="panel" aria-labelledby="response-trend-title">
           <div className="panel__header">
             <div>
-              <h2 id="response-trend-title">Response signal</h2>
+              <h2 id="response-trend-title">Response momentum</h2>
               <p>Weekly delivered outreach that received a response</p>
             </div>
             <StatusBadge label="Clear signal" status="clear" />
@@ -118,8 +215,8 @@ export default function DashboardPage() {
         <section className="panel panel--flush" aria-labelledby="actions-title">
           <div className="panel__header" style={{ padding: '1.25rem 1.25rem 0' }}>
             <div>
-              <h2 id="actions-title">Next best actions</h2>
-              <p>Prioritized by urgency, value, and response context</p>
+              <h2 id="actions-title">Relationship queue</h2>
+              <p>Prioritized by urgency, campaign context, and prior response</p>
             </div>
             <Link className="section-link" href="/follow-ups">
               View all <ArrowRight size={16} />
@@ -137,10 +234,14 @@ export default function DashboardPage() {
                   <span className="avatar">{followUp.initials}</span>
                   <span>
                     <h3>{followUp.contact}</h3>
-                    <small>{followUp.organization}</small>
+                    <small>
+                      {followUp.organization} · {followUp.industry}
+                    </small>
                   </span>
                 </div>
-                <p>{followUp.reason}</p>
+                <p>
+                  {followUp.campaign} · {followUp.reason}
+                </p>
               </div>
               <div className="list-card__meta">
                 <StatusBadge label={followUp.statusLabel} status={followUp.status} />
@@ -153,11 +254,18 @@ export default function DashboardPage() {
         </section>
       </div>
 
+      <div className="dashboard-section-heading">
+        <div>
+          <p className="eyebrow">Timing and value</p>
+          <h2>Decide when to act and where momentum sits</h2>
+          <p>Aggregate patterns stay secondary to contact-level policy and evidence.</p>
+        </div>
+      </div>
       <div className="dashboard-grid dashboard-grid--equal">
         <section className="panel" aria-labelledby="heatmap-title">
           <div className="panel__header">
             <div>
-              <h2 id="heatmap-title">Recommended outreach windows</h2>
+              <h2 id="heatmap-title">Best time to reach people</h2>
               <p>Smoothed response likelihood by recipient-local time</p>
             </div>
             <StatusBadge label="82% data coverage" status="clear" />
@@ -200,7 +308,7 @@ export default function DashboardPage() {
         <section className="panel" aria-labelledby="pipeline-title">
           <div className="panel__header">
             <div>
-              <h2 id="pipeline-title">Sponsorship pipeline</h2>
+              <h2 id="pipeline-title">Campaign value at a glance</h2>
               <p>Open opportunity count and estimated value</p>
             </div>
             <span className="mono" style={{ fontSize: '.75rem' }}>
@@ -228,12 +336,19 @@ export default function DashboardPage() {
         </section>
       </div>
 
+      <div className="dashboard-section-heading">
+        <div>
+          <p className="eyebrow">Trust and traceability</p>
+          <h2>Know where the recommendation came from</h2>
+          <p>Recent decisions, source freshness, and drafting boundaries remain visible.</p>
+        </div>
+      </div>
       <div className="dashboard-grid">
         <section className="panel" aria-labelledby="activity-title">
           <div className="panel__header">
             <div>
-              <h2 id="activity-title">Recent activity</h2>
-              <p>Auditable changes across outreach, data, and drafts</p>
+              <h2 id="activity-title">Decision trail</h2>
+              <p>Auditable changes across relationships, data, and drafts</p>
             </div>
           </div>
           <ol className="timeline">
@@ -254,8 +369,8 @@ export default function DashboardPage() {
           <section className="panel" aria-labelledby="sync-title">
             <div className="panel__header">
               <div>
-                <h2 id="sync-title">Google Sheets sync</h2>
-                <p>Last governed import</p>
+                <h2 id="sync-title">Source freshness</h2>
+                <p>Latest governed Google Sheets snapshot</p>
               </div>
               <StatusBadge label="Healthy" status="clear" />
             </div>
@@ -275,7 +390,7 @@ export default function DashboardPage() {
           <section className="panel panel--dark" aria-labelledby="bob-title">
             <div className="panel__header">
               <div>
-                <h2 id="bob-title">IBM Bob workflow</h2>
+                <h2 id="bob-title">Drafting boundary</h2>
                 <p style={{ color: '#a8a8a8' }}>MCP server available · Runtime unavailable</p>
               </div>
               <Renew aria-hidden style={{ color: 'var(--faro-beam)' }} />

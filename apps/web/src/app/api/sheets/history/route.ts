@@ -7,11 +7,45 @@ import { sessionFromRequest } from '@/lib/server/auth';
 export async function GET(request: NextRequest) {
   const session = await sessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
+  const focusedCampaign = session.focusedCampaignId
+    ? await prisma.campaign.findFirst({
+        select: { sheetConnectionId: true },
+        where: {
+          archivedAt: null,
+          id: session.focusedCampaignId,
+          workspaceId: session.workspaceId,
+        },
+      })
+    : null;
+  if (session.focusedCampaignId && !focusedCampaign?.sheetConnectionId) {
+    return NextResponse.json({ data: [] });
+  }
   const events = await prisma.auditEvent.findMany({
     orderBy: { occurredAt: 'desc' },
     take: 100,
     where: {
-      action: { in: ['GOOGLE_SHEET_READ', 'GOOGLE_SHEET_SYNC_COMPLETED'] },
+      OR: [
+        { action: 'GOOGLE_SHEET_READ' },
+        {
+          action: {
+            in: ['GOOGLE_SHEET_SYNC_COMPLETED', 'GOOGLE_SHEET_SYNC_FAILED'],
+          },
+          metadata: { equals: 'MANUAL_IMPORT', path: ['trigger'] },
+        },
+        {
+          action: {
+            in: ['GOOGLE_SHEET_SYNC_COMPLETED', 'GOOGLE_SHEET_SYNC_FAILED'],
+          },
+          metadata: { equals: 'MANUAL_REFRESH', path: ['trigger'] },
+        },
+        {
+          action: {
+            in: ['GOOGLE_SHEET_SYNC_COMPLETED', 'GOOGLE_SHEET_SYNC_FAILED'],
+          },
+          metadata: { equals: 'OAUTH_RECONNECT', path: ['trigger'] },
+        },
+      ],
+      entityId: focusedCampaign?.sheetConnectionId ?? undefined,
       workspaceId: session.workspaceId,
     },
   });

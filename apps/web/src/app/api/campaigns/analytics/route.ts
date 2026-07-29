@@ -31,7 +31,11 @@ export async function GET(request: NextRequest) {
       status: true,
       type: true,
     },
-    where: { archivedAt: null, workspaceId: session.workspaceId },
+    where: {
+      archivedAt: null,
+      id: session.focusedCampaignId ?? undefined,
+      workspaceId: session.workspaceId,
+    },
   });
   return NextResponse.json({
     data: campaigns.map((campaign) => {

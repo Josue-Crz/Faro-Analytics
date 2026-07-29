@@ -79,6 +79,10 @@ export default function ContactDetailPage() {
               <dd>{contact.organization}</dd>
             </div>
             <div>
+              <dt>Company category</dt>
+              <dd>{contact.industry}</dd>
+            </div>
+            <div>
               <dt>Preferred channel</dt>
               <dd>Email</dd>
             </div>

@@ -51,6 +51,44 @@ function startSheetPolling(): void {
   setInterval(() => void poll(), intervalMs);
 }
 
+function startNotificationPolling(): void {
+  const webUrl = process.env.FARO_WEB_URL?.trim();
+  const secret = process.env.FARO_NOTIFICATION_CRON_SECRET?.trim();
+  if (!webUrl || !secret) return;
+  const requestedInterval = Number(process.env.FARO_NOTIFICATION_POLL_INTERVAL_MS ?? 30_000);
+  const intervalMs = Math.min(Math.max(requestedInterval, 15_000), 900_000);
+  let running = false;
+  const poll = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const response = await fetch(new URL('/api/cron/notifications', webUrl), {
+        headers: { authorization: `Bearer ${secret}` },
+        method: 'POST',
+      });
+      console.info(
+        JSON.stringify({
+          component: 'faro-worker',
+          operation: 'follow-up-notifications',
+          status: response.ok ? 'SUCCEEDED' : `HTTP_${response.status}`,
+        }),
+      );
+    } catch {
+      console.error(
+        JSON.stringify({
+          component: 'faro-worker',
+          operation: 'follow-up-notifications',
+          status: 'REQUEST_FAILED',
+        }),
+      );
+    } finally {
+      running = false;
+    }
+  };
+  void poll();
+  setInterval(() => void poll(), intervalMs);
+}
+
 async function main(): Promise<void> {
   const mode = process.env.FARO_WORKER_MODE ?? 'preview';
   if (mode !== 'preview') {
@@ -78,6 +116,7 @@ async function main(): Promise<void> {
     }),
   );
   startSheetPolling();
+  startNotificationPolling();
 }
 
 void main().catch((error: unknown) => {

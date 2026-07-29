@@ -1,11 +1,30 @@
 'use client';
 
-import { Add, Renew, Search, TrashCan, Upload } from '@carbon/icons-react';
+import {
+  Add,
+  ArrowRight,
+  DataBase,
+  Edit,
+  Renew,
+  Search,
+  TrashCan,
+  Upload,
+} from '@carbon/icons-react';
 import { Button, InlineNotification, TextArea, TextInput } from '@carbon/react';
-import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 
-import { PageHeader } from './PageHeader';
+import { categorizeOrganization, COMPANY_CATEGORIES } from '@faro/core';
+
+import { groupCompaniesByIndustry } from '@/lib/company-categories';
+
+import { CampaignPulseChart } from './CampaignPulseChart';
+import { CompanyCategoryGraph } from './CompanyCategoryGraph';
 import { MetricCard } from './MetricCard';
+import { OutreachPlanningCalendar } from './OutreachPlanningCalendar';
+import { PageHeader } from './PageHeader';
+import { StatusBadge } from './StatusBadge';
 
 interface Records {
   bobRequests: Array<{
@@ -17,10 +36,21 @@ interface Records {
   }>;
   campaigns: Array<{
     _count: { campaignContacts: number; followUpTasks: number };
-    campaignContacts: Array<{ contactId: string }>;
+    endAt: string | null;
     id: string;
     name: string;
     objective: string;
+    sheetConnection: {
+      displayName: string;
+      id: string;
+      lastSyncedAt: string | null;
+      readRange: string;
+      schedule: string | null;
+      status: string;
+      worksheetId: string;
+    } | null;
+    sheetConnectionId: string | null;
+    startAt: string | null;
     status: string;
     type: string;
   }>;
@@ -30,12 +60,42 @@ interface Records {
     firstName: string;
     id: string;
     lastName: string;
-    organization: { name: string } | null;
+    organization: {
+      industry: string;
+      name: string;
+      type: string;
+      website: string | null;
+    } | null;
+    phone: string | null;
+    preferredChannel: string;
     source: string | null;
+    timezone: string;
+    title: string | null;
     type: string;
+    updatedAt: string;
+  }>;
+  dataSources: Array<{
+    displayName: string;
+    id: string;
+    lastSyncedAt: string | null;
+    readRange: string;
+    schedule: string | null;
+    status: string;
+    worksheetId: string;
   }>;
   followUps: Array<{
-    contact: { firstName: string; id: string; lastName: string };
+    campaign: { id: string; name: string };
+    contact: {
+      firstName: string;
+      id: string;
+      lastName: string;
+      organization: {
+        industry: string;
+        name: string;
+        type: string;
+        website: string | null;
+      } | null;
+    };
     dueAt: string;
     id: string;
     priority: string;
@@ -52,8 +112,18 @@ interface Records {
     occurredAt: string;
     subject: string | null;
   }>;
+  planningReferenceTime: string;
   organizations: Array<{
     _count: { contacts: number };
+    categoryConfidence: 'HIGH' | 'MEDIUM' | 'LOW' | null;
+    categorySource:
+      | 'SOURCE_FIELD'
+      | 'THIRD_PARTY_CONTEXT'
+      | 'WIKIDATA'
+      | 'NAME_OR_DOMAIN'
+      | 'BEST_EFFORT'
+      | 'FALLBACK'
+      | null;
     contacts: Array<{
       consentStatus: string;
       email: string | null;
@@ -64,18 +134,41 @@ interface Records {
       type: string;
     }>;
     id: string;
+    industry: string;
     name: string;
     type: string;
     website: string | null;
   }>;
+  scope: {
+    campaign: { id: string; name: string } | null;
+    kind: 'CAMPAIGN' | 'WORKSPACE';
+  };
   trashedOrganizations: Array<{
     _count: { contacts: number };
+    categoryConfidence: 'HIGH' | 'MEDIUM' | 'LOW' | null;
+    categorySource:
+      | 'SOURCE_FIELD'
+      | 'THIRD_PARTY_CONTEXT'
+      | 'WIKIDATA'
+      | 'NAME_OR_DOMAIN'
+      | 'BEST_EFFORT'
+      | 'FALLBACK'
+      | null;
     deletedAt: string;
     id: string;
+    industry: string;
     name: string;
     type: string;
     website: string | null;
   }>;
+  workspace: {
+    defaultTimezone: string;
+    id: string;
+    name: string;
+    quietHoursEnd: string;
+    quietHoursStart: string;
+    slug: string;
+  };
 }
 
 interface CampaignAnalytics {
@@ -99,14 +192,17 @@ interface CampaignAnalytics {
 
 const routeTitles: Record<string, [string, string]> = {
   '/analytics': [
-    'Analytics',
-    'Analytics remain empty until the connected workspace has real activity.',
+    'Analytics (Soon)',
+    'Choose a question, compare campaigns, and turn workspace activity into one clear next step.',
   ],
   '/campaigns': [
-    'Campaigns',
-    'Campaigns are created by workspace users, never implicitly by a Sheet import.',
+    'Campaign workspaces',
+    'Create separate campaign work areas, each with its own contacts and associated database source.',
   ],
-  '/contacts': ['Contacts', 'Google Sheet contacts imported into this connected workspace.'],
+  '/contacts': [
+    'Contacts database',
+    'Review imported records here, then open a campaign workspace for campaign-specific access.',
+  ],
   '/follow-ups': [
     'Follow-ups',
     'Imported dates remain pending until you assign the contact to a campaign.',
@@ -121,19 +217,67 @@ const routeTitles: Record<string, [string, string]> = {
   ],
 };
 
+function categorySourceLabel(source: Records['organizations'][number]['categorySource']): string {
+  switch (source) {
+    case 'SOURCE_FIELD':
+      return 'source category';
+    case 'THIRD_PARTY_CONTEXT':
+      return 'third-party taxonomy';
+    case 'WIKIDATA':
+      return 'verified with Wikidata';
+    case 'NAME_OR_DOMAIN':
+      return 'inferred from company name/domain';
+    case 'BEST_EFFORT':
+      return 'best-effort classification';
+    case 'FALLBACK':
+      return 'legacy fallback';
+    default:
+      return 'existing category';
+  }
+}
+
+function categoryDisplayLabel(
+  organization?: {
+    industry?: string | null;
+    name: string;
+    type?: string | null;
+    website?: string | null;
+  } | null,
+): string {
+  if (!organization) return 'No company category';
+  if (organization.industry && organization.industry !== 'Other') return organization.industry;
+  return categorizeOrganization({
+    explicitCategory: organization.industry,
+    name: organization.name,
+    organizationType: organization.type,
+    website: organization.website,
+  }).category;
+}
+
+function campaignDateLabel(startAt: string | null, endAt: string | null): string {
+  if (!startAt || !endAt) return 'Dates not assigned';
+  const format = (value: string) =>
+    new Intl.DateTimeFormat(undefined, {
+      day: 'numeric',
+      month: 'short',
+      timeZone: 'UTC',
+      year: 'numeric',
+    }).format(new Date(value));
+  return `${format(startAt)} – ${format(endAt)}`;
+}
+
 export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
+  const router = useRouter();
   const route =
     Object.keys(routeTitles).find((candidate) => pathname.startsWith(candidate)) ?? pathname;
   const [data, setData] = useState<Records | null>(null);
   const [error, setError] = useState(false);
   const [campaignName, setCampaignName] = useState('');
   const [campaignObjective, setCampaignObjective] = useState('');
+  const [campaignSourceId, setCampaignSourceId] = useState('');
   const [campaignType, setCampaignType] = useState('SPONSORSHIP');
   const [followUpCampaignId, setFollowUpCampaignId] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
-  const [selectedCampaignId, setSelectedCampaignId] = useState('');
-  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([]);
-  const [campaignContactQuery, setCampaignContactQuery] = useState('');
   const [analytics, setAnalytics] = useState<CampaignAnalytics[]>([]);
   const [analyticsCampaignId, setAnalyticsCampaignId] = useState('');
 
@@ -142,8 +286,11 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
     if (!response.ok) throw new Error('records');
     const result = (await response.json()) as { data: Records };
     setData(result.data);
-    setFollowUpCampaignId((current) => current || result.data.campaigns[0]?.id || '');
-    setSelectedCampaignId((current) => current || result.data.campaigns[0]?.id || '');
+    setFollowUpCampaignId(
+      (current) =>
+        result.data.scope.campaign?.id ?? (current || result.data.campaigns[0]?.id || ''),
+    );
+    setCampaignSourceId((current) => current || result.data.dataSources[0]?.id || '');
   }
   useEffect(() => {
     void fetch('/api/workspace/records', { cache: 'no-store' })
@@ -153,8 +300,8 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
       })
       .then((result) => {
         setData(result.data);
-        setFollowUpCampaignId(result.data.campaigns[0]?.id ?? '');
-        setSelectedCampaignId(result.data.campaigns[0]?.id ?? '');
+        setFollowUpCampaignId(result.data.scope.campaign?.id ?? result.data.campaigns[0]?.id ?? '');
+        setCampaignSourceId(result.data.dataSources[0]?.id ?? '');
       })
       .catch(() => setError(true));
   }, []);
@@ -178,6 +325,7 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
       body: JSON.stringify({
         name: campaignName,
         objective: campaignObjective,
+        sheetConnectionId: campaignSourceId || null,
         type: campaignType,
       }),
       headers: { 'content-type': 'application/json' },
@@ -190,25 +338,9 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
     const result = (await response.json()) as { data: { id: string } };
     setCampaignName('');
     setCampaignObjective('');
-    setNotice('Campaign created as a draft.');
+    setNotice('Campaign workspace created as a draft.');
     await load();
-    setSelectedCampaignId(result.data.id);
-  }
-
-  async function assignContacts() {
-    if (!selectedCampaignId || !selectedContactIds.length) return;
-    const response = await fetch(`/api/campaigns/${selectedCampaignId}/contacts`, {
-      body: JSON.stringify({ contactIds: selectedContactIds }),
-      headers: { 'content-type': 'application/json' },
-      method: 'POST',
-    });
-    if (!response.ok) {
-      setNotice('Faro could not associate those contacts with the campaign.');
-      return;
-    }
-    setNotice(`${selectedContactIds.length} contacts associated with the campaign.`);
-    setSelectedContactIds([]);
-    await load();
+    router.push(`/campaigns/${encodeURIComponent(result.data.id)}`);
   }
 
   async function activateImportedFollowUps() {
@@ -257,17 +389,6 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
         aria-label="Loading workspace records"
       />
     );
-  const associationCampaign = data.campaigns.find((campaign) => campaign.id === selectedCampaignId);
-  const associationContacts = data.contacts.filter((contact) =>
-    `${contact.firstName} ${contact.lastName} ${contact.email ?? ''} ${contact.organization?.name ?? ''}`
-      .toLocaleLowerCase('en-US')
-      .includes(campaignContactQuery.toLocaleLowerCase('en-US')),
-  );
-  const selectableAssociationContacts = associationContacts.filter(
-    (contact) =>
-      !associationCampaign?.campaignContacts.some((item) => item.contactId === contact.id),
-  );
-
   return (
     <div className="page-shell">
       <PageHeader
@@ -278,8 +399,16 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
             </Button>
           ) : undefined
         }
-        description={description}
-        eyebrow="Connected workspace · Real data only"
+        description={
+          data.scope.campaign && route !== '/campaigns'
+            ? `${description} Showing only records assigned to ${data.scope.campaign.name}.`
+            : description
+        }
+        eyebrow={
+          data.scope.campaign
+            ? `${data.scope.campaign.name} · Campaign focus`
+            : `${data.workspace.name} · Connected workspace`
+        }
         title={title}
       />
       {notice ? (
@@ -289,8 +418,17 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
       {route === '/campaigns' ? (
         <>
           <section className="panel">
-            <h2>Create campaign</h2>
-            <div className="sheet-preview-actions">
+            <div className="panel__header">
+              <div>
+                <h2>Create campaign workspace</h2>
+                <p>
+                  Choose the database source this campaign will use, then open it to manage its
+                  contacts.
+                </p>
+              </div>
+              <Add aria-hidden size={24} />
+            </div>
+            <div className="campaign-create-form">
               <TextInput
                 id="campaign-name"
                 labelText="Campaign name"
@@ -318,147 +456,127 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
                   <option value="COMMUNITY">Community</option>
                 </select>
               </label>
+              <label>
+                <span>Campaign data source</span>
+                <select
+                  className="filter-select"
+                  onChange={(event) => setCampaignSourceId(event.target.value)}
+                  value={campaignSourceId}
+                >
+                  <option value="">Faro database only · no external poll</option>
+                  {data.dataSources.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.displayName} / {source.worksheetId} ·{' '}
+                      {source.status.replaceAll('_', ' ')}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <Button
                 disabled={!campaignName.trim() || !campaignObjective.trim()}
                 onClick={() => void createCampaign()}
                 renderIcon={Add}
               >
-                Create draft campaign
+                Create and open campaign
               </Button>
             </div>
           </section>
-          <RecordList
-            empty="No campaigns yet. Create the first campaign above."
-            rows={data.campaigns.map((item) => ({
-              id: item.id,
-              primary: item.name,
-              secondary: `${item.type} · ${item.status} · ${item._count.campaignContacts} contacts · ${item._count.followUpTasks} follow-ups`,
-            }))}
-          />
-          {data.campaigns.length ? (
-            <section className="panel">
-              <h2>Associate contacts</h2>
-              <div className="form-row">
-                <label>
-                  <span>Existing campaign</span>
-                  <select
-                    className="filter-select"
-                    value={selectedCampaignId}
-                    onChange={(event) => setSelectedCampaignId(event.target.value)}
-                  >
-                    {data.campaigns.map((campaign) => (
-                      <option key={campaign.id} value={campaign.id}>
+          <section aria-labelledby="campaign-workspaces-title">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Separated work areas</p>
+                <h2 id="campaign-workspaces-title">Campaign workspaces</h2>
+              </div>
+              <p>Open a campaign to access its contacts, follow-ups, and associated database.</p>
+            </div>
+            <div className="campaign-workspace-grid">
+              {data.campaigns.map((campaign) => (
+                <article className="campaign-workspace-card" key={campaign.id}>
+                  <div className="campaign-workspace-card__topline">
+                    <span className="faro-tag">{campaign.type.replaceAll('_', ' ')}</span>
+                    <StatusBadge
+                      label={
+                        data.scope.campaign?.id === campaign.id ? 'CURRENT FOCUS' : campaign.status
+                      }
+                      status={
+                        data.scope.campaign?.id === campaign.id
+                          ? 'clear'
+                          : campaign.status === 'ACTIVE'
+                            ? 'ready'
+                            : 'attention'
+                      }
+                    />
+                  </div>
+                  <div>
+                    <h3>
+                      <Link href={`/campaigns/${encodeURIComponent(campaign.id)}`}>
                         {campaign.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="search-field">
-                  <span className="visually-hidden">Search contacts to associate</span>
-                  <Search aria-hidden size={16} />
-                  <input
-                    onChange={(event) => setCampaignContactQuery(event.target.value)}
-                    placeholder="Search contacts"
-                    type="search"
-                    value={campaignContactQuery}
-                  />
-                </label>
-              </div>
-              <div className="page-actions" style={{ marginBlock: '1rem' }}>
-                <Button
-                  kind="ghost"
-                  size="sm"
-                  disabled={!selectableAssociationContacts.length}
-                  onClick={() =>
-                    setSelectedContactIds((current) => [
-                      ...new Set([
-                        ...current,
-                        ...selectableAssociationContacts.map((contact) => contact.id),
-                      ]),
-                    ])
-                  }
-                >
-                  Select all shown
-                </Button>
-                <Button
-                  kind="ghost"
-                  size="sm"
-                  disabled={!selectedContactIds.length}
-                  onClick={() => setSelectedContactIds([])}
-                >
-                  Clear
-                </Button>
-                <span className="mono" style={{ fontSize: '.75rem' }}>
-                  {selectedContactIds.length} selected
-                </span>
-              </div>
-              <div
-                style={{
-                  border: '1px solid var(--cds-border-subtle)',
-                  maxHeight: '16rem',
-                  overflowY: 'auto',
-                  padding: '.5rem 1rem',
-                }}
-              >
-                {associationContacts.map((contact) => {
-                  const assigned = associationCampaign?.campaignContacts.some(
-                    (item) => item.contactId === contact.id,
-                  );
-                  return (
-                    <label
-                      key={contact.id}
-                      style={{
-                        alignItems: 'center',
-                        display: 'flex',
-                        gap: '.5rem',
-                        marginBlock: '.35rem',
-                      }}
-                    >
-                      <input
-                        checked={assigned || selectedContactIds.includes(contact.id)}
-                        disabled={assigned}
-                        onChange={(event) =>
-                          setSelectedContactIds((current) =>
-                            event.target.checked
-                              ? [...current, contact.id]
-                              : current.filter((id) => id !== contact.id),
-                          )
-                        }
-                        type="checkbox"
-                      />{' '}
-                      <span>
-                        {contact.firstName} {contact.lastName}
-                        <small className="table-subtext">
-                          {contact.organization?.name ?? 'No organization'} ·{' '}
-                          {contact.email ?? 'No email'}
-                          {assigned ? ' · already assigned' : ''}
-                        </small>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-              <div className="page-actions" style={{ marginTop: '1rem' }}>
-                <Button disabled={!selectedContactIds.length} onClick={() => void assignContacts()}>
-                  Add selected contacts
-                </Button>
-              </div>
-            </section>
-          ) : null}
+                      </Link>
+                    </h3>
+                    <p>{campaign.objective}</p>
+                    <p>{campaignDateLabel(campaign.startAt, campaign.endAt)}</p>
+                  </div>
+                  <dl className="campaign-workspace-card__metrics">
+                    <div>
+                      <dt>Contacts</dt>
+                      <dd>{campaign._count.campaignContacts}</dd>
+                    </div>
+                    <div>
+                      <dt>Follow-ups</dt>
+                      <dd>{campaign._count.followUpTasks}</dd>
+                    </div>
+                  </dl>
+                  <div className="campaign-workspace-card__source">
+                    <DataBase aria-hidden size={18} />
+                    <span>
+                      <small>Associated database</small>
+                      <strong>
+                        {campaign.sheetConnection
+                          ? `${campaign.sheetConnection.displayName} / ${campaign.sheetConnection.worksheetId}`
+                          : 'Faro workspace database only'}
+                      </strong>
+                      <small>
+                        {campaign.sheetConnection
+                          ? `${campaign.sheetConnection.status.replaceAll('_', ' ')} · last sync ${
+                              campaign.sheetConnection.lastSyncedAt
+                                ? new Date(campaign.sheetConnection.lastSyncedAt).toLocaleString()
+                                : 'never'
+                            }`
+                          : 'No external polling source'}
+                      </small>
+                    </span>
+                  </div>
+                  <Link
+                    aria-label={`Open ${campaign.name} campaign workspace`}
+                    className="campaign-workspace-card__open"
+                    href={`/campaigns/${encodeURIComponent(campaign.id)}`}
+                  >
+                    Open campaign <ArrowRight aria-hidden size={16} />
+                  </Link>
+                </article>
+              ))}
+              {!data.campaigns.length ? (
+                <div className="panel empty-state">
+                  <DataBase size={40} />
+                  <h2>No campaign workspaces yet</h2>
+                  <p>Create the first campaign and choose its database source above.</p>
+                </div>
+              ) : null}
+            </div>
+          </section>
         </>
       ) : null}
       {route === '/contacts' ? (
-        <RecordList
-          empty="No contacts yet. Import a Google Sheet to add them."
-          rows={data.contacts.map((item) => ({
-            id: item.id,
-            primary: `${item.firstName} ${item.lastName}`,
-            secondary: `${item.email ?? 'No email'} · ${item.organization?.name ?? 'No organization'} · ${item.consentStatus}`,
-          }))}
+        <ContactDirectory
+          campaigns={data.campaigns}
+          contacts={data.contacts}
+          reload={load}
+          scope={data.scope}
         />
       ) : null}
       {route === '/organizations' ? (
         <OrganizationRoster
+          campaignFocused={data.scope.kind === 'CAMPAIGN'}
           organizations={data.organizations}
           trashedOrganizations={data.trashedOrganizations}
           updateTrash={updateOrganizationTrash}
@@ -478,11 +596,16 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
                       onChange={(event) => setFollowUpCampaignId(event.target.value)}
                       value={followUpCampaignId}
                     >
-                      {data.campaigns.map((campaign) => (
-                        <option key={campaign.id} value={campaign.id}>
-                          {campaign.name}
-                        </option>
-                      ))}
+                      {data.campaigns
+                        .filter(
+                          (campaign) =>
+                            !data.scope.campaign || campaign.id === data.scope.campaign.id,
+                        )
+                        .map((campaign) => (
+                          <option key={campaign.id} value={campaign.id}>
+                            {campaign.name}
+                          </option>
+                        ))}
                     </select>
                   </label>
                   <Button
@@ -497,14 +620,7 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
               )}
             </section>
           ) : null}
-          <RecordList
-            empty="No active follow-up tasks. Create a campaign and assign contacts before activating pending dates."
-            rows={data.followUps.map((item) => ({
-              id: item.id,
-              primary: `${item.contact.firstName} ${item.contact.lastName}`,
-              secondary: `${new Date(item.dueAt).toLocaleString()} · ${item.status} · ${item.reason}`,
-            }))}
-          />
+          <FollowUpDirectory followUps={data.followUps} />
           {data.importedFollowUps.length ? (
             <InlineNotification
               hideCloseButton
@@ -520,6 +636,7 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
       {route === '/analytics' ? (
         <CampaignAnalyticsView
           campaigns={analytics}
+          organizations={data.organizations}
           selectedId={analyticsCampaignId}
           setSelectedId={setAnalyticsCampaignId}
         />
@@ -528,17 +645,557 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
   );
 }
 
+interface ContactEditDraft {
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  preferredChannel: string;
+  timezone: string;
+  title: string;
+  type: string;
+}
+
+interface ContactSavePayload {
+  email: string | null;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  preferredChannel: string;
+  timezone: string;
+  title: string | null;
+  type: string;
+}
+
+interface PendingContactSave {
+  attempts: number;
+  contactId: string;
+  createdAt: number;
+  payload: ContactSavePayload;
+  returnTo: '/contacts' | '/outreach';
+}
+
+const PENDING_CONTACT_SAVE_KEY = 'faro:pending-contact-sheet-save';
+
+function preservePendingContactSave(value: PendingContactSave) {
+  window.sessionStorage.setItem(PENDING_CONTACT_SAVE_KEY, JSON.stringify(value));
+}
+
+function takePendingContactSave(returnTo: PendingContactSave['returnTo']) {
+  const raw = window.sessionStorage.getItem(PENDING_CONTACT_SAVE_KEY);
+  if (!raw) return null;
+  window.sessionStorage.removeItem(PENDING_CONTACT_SAVE_KEY);
+  try {
+    const parsed = JSON.parse(raw) as Partial<PendingContactSave>;
+    return parsed.returnTo === returnTo &&
+      typeof parsed.contactId === 'string' &&
+      typeof parsed.createdAt === 'number' &&
+      Date.now() - parsed.createdAt < 15 * 60_000 &&
+      parsed.payload &&
+      typeof parsed.payload === 'object'
+      ? (parsed as PendingContactSave)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const contactTypes = [
+  'PARTICIPANT',
+  'SPONSOR',
+  'PARTNER',
+  'DONOR',
+  'SPEAKER',
+  'VENDOR',
+  'OTHER',
+] as const;
+const contactChannels = ['EMAIL', 'PHONE', 'SMS', 'MEETING', 'SOCIAL', 'OTHER'] as const;
+
+function ContactDirectory({
+  campaigns,
+  contacts,
+  reload,
+  scope,
+}: {
+  campaigns: Records['campaigns'];
+  contacts: Records['contacts'];
+  reload: () => Promise<void>;
+  scope: Records['scope'];
+}) {
+  const [industry, setIndustry] = useState('All categories');
+  const [editDraft, setEditDraft] = useState<ContactEditDraft | null>(null);
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [workingContactId, setWorkingContactId] = useState<string | null>(null);
+  const [view, setView] = useState<'all' | 'imported'>('all');
+  const importedContacts = contacts.filter((contact) =>
+    contact.source?.startsWith('google-sheets:'),
+  );
+  const visibleContacts = (view === 'imported' ? importedContacts : contacts).filter(
+    (contact) =>
+      `${contact.firstName} ${contact.lastName} ${contact.email ?? ''} ${contact.organization?.name ?? ''}`
+        .concat(` ${contact.organization?.industry ?? ''}`)
+        .toLocaleLowerCase('en-US')
+        .includes(query.toLocaleLowerCase('en-US')) &&
+      (industry === 'All categories' || categoryDisplayLabel(contact.organization) === industry),
+  );
+
+  async function confirmOutreachBasis(contactId: string) {
+    if (!window.confirm('Confirm that you have a lawful outreach basis for this contact?')) return;
+    setWorkingContactId(contactId);
+    const response = await fetch(`/api/contacts/${contactId}/consent`, {
+      body: JSON.stringify({ status: 'IMPLIED' }),
+      headers: { 'content-type': 'application/json' },
+      method: 'POST',
+    });
+    if (!response.ok) {
+      setMessage('Faro could not update the outreach basis.');
+      setWorkingContactId(null);
+      return;
+    }
+    setMessage('Outreach basis confirmed. This contact is now eligible for a governed draft.');
+    await reload();
+    setWorkingContactId(null);
+  }
+
+  function beginContactEdit(contact: Records['contacts'][number]) {
+    setEditingContactId(contact.id);
+    setEditDraft({
+      email: contact.email ?? '',
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      phone: contact.phone ?? '',
+      preferredChannel: contact.preferredChannel,
+      timezone: contact.timezone,
+      title: contact.title ?? '',
+      type: contact.type,
+    });
+    setMessage(null);
+  }
+
+  function updateEditDraft(field: keyof ContactEditDraft, value: string) {
+    setEditDraft((current) => (current ? { ...current, [field]: value } : current));
+  }
+
+  const persistContactEdit = useCallback(
+    async (contactId: string, payload: ContactSavePayload, attempts = 0) => {
+      setWorkingContactId(contactId);
+      const response = await fetch(`/api/contacts/${contactId}?returnTo=/contacts`, {
+        body: JSON.stringify(payload),
+        headers: { 'content-type': 'application/json' },
+        method: 'PATCH',
+      });
+      const result = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+        reconnect?: string;
+        sheetWriteBack?: { status: 'NO_CHANGES' | 'NOT_APPLICABLE' | 'WRITTEN' };
+      } | null;
+      if (response.status === 409 && result?.reconnect) {
+        if (attempts >= 1) {
+          setMessage(
+            'Google still has not granted Sheet edit access. Reconnect from Integrations, then save again.',
+          );
+          setWorkingContactId(null);
+          return;
+        }
+        preservePendingContactSave({
+          attempts: attempts + 1,
+          contactId,
+          createdAt: Date.now(),
+          payload,
+          returnTo: '/contacts',
+        });
+        window.location.assign(result.reconnect);
+        return;
+      }
+      if (!response.ok) {
+        setMessage(
+          result?.error === 'CONTACT_EMAIL_CONFLICT'
+            ? 'That email is already assigned to another contact in this workspace.'
+            : (result?.message ??
+                'Faro could not save the contact. Check every field and try again.'),
+        );
+        setWorkingContactId(null);
+        return;
+      }
+      await reload();
+      setEditingContactId(null);
+      setEditDraft(null);
+      setWorkingContactId(null);
+      setMessage(
+        result?.sheetWriteBack?.status === 'WRITTEN'
+          ? 'Contact saved in Faro and written back to its Google Sheet source row.'
+          : result?.sheetWriteBack?.status === 'NOT_APPLICABLE'
+            ? 'Contact saved in Faro. This database-only contact has no Google Sheet source row.'
+            : 'Contact saved. No field values changed.',
+      );
+    },
+    [reload],
+  );
+
+  useEffect(() => {
+    const pending = takePendingContactSave('/contacts');
+    if (!pending) return;
+    const resumeTimer = window.setTimeout(() => {
+      void persistContactEdit(pending.contactId, pending.payload, pending.attempts);
+    }, 0);
+    return () => window.clearTimeout(resumeTimer);
+  }, [persistContactEdit]);
+
+  async function saveContactEdit(contactId: string) {
+    if (!editDraft) return;
+    await persistContactEdit(contactId, {
+      ...editDraft,
+      email: editDraft.email.trim() || null,
+      phone: editDraft.phone.trim() || null,
+      title: editDraft.title.trim() || null,
+    });
+  }
+
+  return (
+    <>
+      <section className="panel" aria-labelledby="contact-campaign-access-title">
+        <div className="panel__header">
+          <div>
+            <h2 id="contact-campaign-access-title">
+              {scope.campaign ? `${scope.campaign.name} contacts` : 'Campaign contact access'}
+            </h2>
+            <p>
+              {scope.campaign
+                ? 'Only contacts assigned to the focused campaign are visible. Open another campaign and use its focus button to switch.'
+                : 'The workspace database remains visible here for import review. Open a campaign to work with its assigned contacts and campaign-specific history.'}
+            </p>
+          </div>
+        </div>
+        <div className="campaign-access-list">
+          {campaigns
+            .filter((campaign) => !scope.campaign || campaign.id === scope.campaign.id)
+            .map((campaign) => (
+              <Link
+                className="campaign-access-link"
+                href={`/campaigns/${encodeURIComponent(campaign.id)}`}
+                key={campaign.id}
+              >
+                <span>
+                  <strong>{campaign.name}</strong>
+                  <small>
+                    {campaign._count.campaignContacts} contacts ·{' '}
+                    {campaign.sheetConnection?.displayName ?? 'Faro database only'}
+                  </small>
+                </span>
+                <ArrowRight aria-hidden size={16} />
+              </Link>
+            ))}
+          {!campaigns.length ? (
+            <p className="empty-inline">Create a campaign workspace to organize contact access.</p>
+          ) : null}
+        </div>
+      </section>
+      <nav className="queue-tabs" aria-label="Contact views">
+        <button
+          aria-current={view === 'all' ? 'page' : undefined}
+          onClick={() => setView('all')}
+          type="button"
+        >
+          All contacts <span>{contacts.length}</span>
+        </button>
+        <button
+          aria-current={view === 'imported' ? 'page' : undefined}
+          onClick={() => setView('imported')}
+          type="button"
+        >
+          Recently imported <span>{importedContacts.length}</span>
+        </button>
+      </nav>
+      {message ? (
+        <InlineNotification hideCloseButton kind="info" lowContrast title={message} />
+      ) : null}
+      <div className="filters-bar" aria-label="Contact search filters">
+        <div className="filters-bar__group">
+          <label className="search-field">
+            <span className="visually-hidden">Search contacts</span>
+            <Search aria-hidden size={16} />
+            <input
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search name, company, or email"
+              type="search"
+              value={query}
+            />
+          </label>
+          <label>
+            <span className="visually-hidden">Filter contacts by company category</span>
+            <select
+              className="filter-select"
+              onChange={(event) => setIndustry(event.target.value)}
+              value={industry}
+            >
+              <option>All categories</option>
+              {COMPANY_CATEGORIES.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+      <section
+        className="panel panel--flush record-scroll-region"
+        aria-label={`${view} contacts. Scroll within this list to browse results.`}
+        tabIndex={0}
+      >
+        {visibleContacts.map((contact) => {
+          const editing = editingContactId === contact.id && editDraft;
+          return (
+            <div className="contact-record" key={contact.id}>
+              <div className="list-card">
+                <div>
+                  <h3>
+                    {contact.firstName} {contact.lastName}
+                  </h3>
+                  <p>
+                    {contact.email ?? 'No email'} · {contact.organization?.name ?? 'No company'} ·{' '}
+                    {categoryDisplayLabel(contact.organization)}
+                  </p>
+                  <p>
+                    {contact.title ? `Role: ${contact.title} · ` : 'Role not specified · '}
+                    {contact.type} · {contact.consentStatus} · updated{' '}
+                    {new Date(contact.updatedAt).toLocaleString()}
+                  </p>
+                </div>
+                <div className="page-actions">
+                  <Button
+                    disabled={workingContactId === contact.id}
+                    kind="ghost"
+                    onClick={() => beginContactEdit(contact)}
+                    renderIcon={Edit}
+                    size="sm"
+                  >
+                    Edit contact
+                  </Button>
+                  {view === 'imported' ? (
+                    <>
+                      <span
+                        className={`status-badge status-badge--${
+                          contact.consentStatus === 'UNKNOWN' ? 'attention' : 'ready'
+                        }`}
+                      >
+                        {contact.consentStatus === 'UNKNOWN'
+                          ? 'Outreach basis review'
+                          : contact.consentStatus}
+                      </span>
+                      {contact.consentStatus === 'UNKNOWN' ? (
+                        <Button
+                          disabled={workingContactId === contact.id}
+                          kind="tertiary"
+                          onClick={() => void confirmOutreachBasis(contact.id)}
+                          size="sm"
+                        >
+                          Review outreach basis
+                        </Button>
+                      ) : contact.consentStatus === 'OPTED_OUT' ? null : (
+                        <Button href="/campaigns" kind="tertiary" size="sm">
+                          Open a campaign to continue
+                        </Button>
+                      )}
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              {editing ? (
+                <form
+                  className="contact-edit-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveContactEdit(contact.id);
+                  }}
+                >
+                  <fieldset disabled={workingContactId === contact.id}>
+                    <legend>Edit {`${contact.firstName} ${contact.lastName}`}</legend>
+                    <p>
+                      Imported-contact edits update the exact Google Sheet source row. Database-only
+                      contacts remain in Faro because they have no source row.
+                    </p>
+                    <div className="contact-edit-form__grid">
+                      <TextInput
+                        id={`contact-${contact.id}-first-name`}
+                        labelText="First name"
+                        onChange={(event) => updateEditDraft('firstName', event.target.value)}
+                        required
+                        value={editDraft.firstName}
+                      />
+                      <TextInput
+                        id={`contact-${contact.id}-last-name`}
+                        labelText="Last name"
+                        onChange={(event) => updateEditDraft('lastName', event.target.value)}
+                        required
+                        value={editDraft.lastName}
+                      />
+                      <TextInput
+                        id={`contact-${contact.id}-email`}
+                        labelText="Email"
+                        onChange={(event) => updateEditDraft('email', event.target.value)}
+                        type="email"
+                        value={editDraft.email}
+                      />
+                      <TextInput
+                        id={`contact-${contact.id}-phone`}
+                        labelText="Phone"
+                        onChange={(event) => updateEditDraft('phone', event.target.value)}
+                        type="tel"
+                        value={editDraft.phone}
+                      />
+                      <TextInput
+                        id={`contact-${contact.id}-title`}
+                        labelText="Person’s role / title"
+                        onChange={(event) => updateEditDraft('title', event.target.value)}
+                        value={editDraft.title}
+                      />
+                      <TextInput
+                        helperText="Use an IANA timezone such as America/Los_Angeles."
+                        id={`contact-${contact.id}-timezone`}
+                        labelText="Timezone"
+                        onChange={(event) => updateEditDraft('timezone', event.target.value)}
+                        required
+                        value={editDraft.timezone}
+                      />
+                      <label>
+                        Contact type
+                        <select
+                          className="filter-select"
+                          onChange={(event) => updateEditDraft('type', event.target.value)}
+                          value={editDraft.type}
+                        >
+                          {contactTypes.map((type) => (
+                            <option key={type}>{type}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Preferred channel
+                        <select
+                          className="filter-select"
+                          onChange={(event) =>
+                            updateEditDraft('preferredChannel', event.target.value)
+                          }
+                          value={editDraft.preferredChannel}
+                        >
+                          {contactChannels.map((channel) => (
+                            <option key={channel}>{channel}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <div className="page-actions">
+                      <Button
+                        kind="secondary"
+                        onClick={() => {
+                          setEditingContactId(null);
+                          setEditDraft(null);
+                        }}
+                        type="button"
+                      >
+                        Cancel
+                      </Button>
+                      <Button type="submit">
+                        {workingContactId === contact.id ? 'Saving…' : 'Save contact'}
+                      </Button>
+                    </div>
+                  </fieldset>
+                </form>
+              ) : null}
+            </div>
+          );
+        })}
+        {!visibleContacts.length ? (
+          <p style={{ padding: '1.25rem' }}>
+            {contacts.length
+              ? 'No contacts match this search and category filter.'
+              : 'No contacts yet. Import a Google Sheet to add them.'}
+          </p>
+        ) : null}
+      </section>
+    </>
+  );
+}
+
+function FollowUpDirectory({ followUps }: { followUps: Records['followUps'] }) {
+  const [industry, setIndustry] = useState('All categories');
+  const [query, setQuery] = useState('');
+  const visible = followUps.filter(
+    (followUp) =>
+      `${followUp.contact.firstName} ${followUp.contact.lastName} ${followUp.contact.organization?.name ?? ''} ${followUp.contact.organization?.industry ?? ''} ${followUp.campaign.name} ${followUp.reason}`
+        .toLocaleLowerCase('en-US')
+        .includes(query.toLocaleLowerCase('en-US')) &&
+      (industry === 'All categories' ||
+        categoryDisplayLabel(followUp.contact.organization) === industry),
+  );
+  return (
+    <>
+      <div className="filters-bar" aria-label="Follow-up search filters">
+        <div className="filters-bar__group">
+          <label className="search-field">
+            <span className="visually-hidden">Search follow-ups</span>
+            <Search aria-hidden size={16} />
+            <input
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search contact, company, or campaign"
+              type="search"
+              value={query}
+            />
+          </label>
+          <select
+            aria-label="Filter follow-ups by company category"
+            className="filter-select"
+            onChange={(event) => setIndustry(event.target.value)}
+            value={industry}
+          >
+            <option>All categories</option>
+            {COMPANY_CATEGORIES.map((item) => (
+              <option key={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <RecordList
+        empty={
+          followUps.length
+            ? 'No follow-ups match this search and category filter.'
+            : 'No active follow-up tasks. Create a campaign and assign contacts before activating pending dates.'
+        }
+        rows={visible.map((item) => ({
+          id: item.id,
+          primary: `${item.contact.firstName} ${item.contact.lastName}`,
+          secondary: `${item.campaign.name} · ${item.contact.organization?.name ?? 'No company'} · ${categoryDisplayLabel(item.contact.organization)} · ${new Date(item.dueAt).toLocaleString()} · ${item.status} · ${item.reason}`,
+        }))}
+      />
+    </>
+  );
+}
+
 function OutreachCenter({ records, reload }: { records: Records; reload: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [bobContext, setBobContext] = useState('');
   const [emailSignature, setEmailSignature] = useState('');
-  const [campaignId, setCampaignId] = useState('');
+  const [campaignId, setCampaignId] = useState(records.scope.campaign?.id ?? '');
   const [associateWithCampaign, setAssociateWithCampaign] = useState(false);
   const [contactFeedback, setContactFeedback] = useState<Record<string, string>>({});
   const [requestingContactId, setRequestingContactId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [latestRequestId, setLatestRequestId] = useState<string | null>(null);
   const [copiedDraftId, setCopiedDraftId] = useState<string | null>(null);
+  const [editingRoleContactId, setEditingRoleContactId] = useState<string | null>(null);
+  const [industry, setIndustry] = useState('All categories');
+  const [query, setQuery] = useState('');
+  const [roleDraft, setRoleDraft] = useState('');
+  const visibleContacts = records.contacts.filter(
+    (contact) =>
+      `${contact.firstName} ${contact.lastName} ${contact.email ?? ''} ${contact.organization?.name ?? ''}`
+        .concat(` ${contact.organization?.industry ?? ''}`)
+        .toLocaleLowerCase('en-US')
+        .includes(query.toLocaleLowerCase('en-US')) &&
+      (industry === 'All categories' || categoryDisplayLabel(contact.organization) === industry),
+  );
 
   async function copyDraftText(draftId: string, value: string) {
     await navigator.clipboard.writeText(value);
@@ -651,6 +1308,86 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
     setRequestingContactId(null);
   }
 
+  const persistOutreachRole = useCallback(
+    async (contactId: string, payload: ContactSavePayload, attempts = 0) => {
+      setBusy(true);
+      const response = await fetch(`/api/contacts/${contactId}?returnTo=/outreach`, {
+        body: JSON.stringify(payload),
+        headers: { 'content-type': 'application/json' },
+        method: 'PATCH',
+      });
+      const result = (await response.json().catch(() => null)) as {
+        message?: string;
+        reconnect?: string;
+        sheetWriteBack?: { status: 'NO_CHANGES' | 'NOT_APPLICABLE' | 'WRITTEN' };
+      } | null;
+      if (response.status === 409 && result?.reconnect) {
+        if (attempts >= 1) {
+          setContactFeedback((current) => ({
+            ...current,
+            [contactId]:
+              'Google still has not granted Sheet edit access. Reconnect from Integrations, then save the role again.',
+          }));
+          setBusy(false);
+          return;
+        }
+        preservePendingContactSave({
+          attempts: attempts + 1,
+          contactId,
+          createdAt: Date.now(),
+          payload,
+          returnTo: '/outreach',
+        });
+        window.location.assign(result.reconnect);
+        return;
+      }
+      if (!response.ok) {
+        setContactFeedback((current) => ({
+          ...current,
+          [contactId]: result?.message ?? 'Faro could not save this person’s role.',
+        }));
+        setBusy(false);
+        return;
+      }
+      setContactFeedback((current) => ({
+        ...current,
+        [contactId]:
+          result?.sheetWriteBack?.status === 'WRITTEN'
+            ? 'Role saved in Faro and written back to this contact’s Google Sheet source row.'
+            : result?.sheetWriteBack?.status === 'NOT_APPLICABLE'
+              ? 'Role saved in Faro. This database-only contact has no Google Sheet source row.'
+              : 'Role already matched the saved value.',
+      }));
+      setEditingRoleContactId(null);
+      setRoleDraft('');
+      await reload();
+      setBusy(false);
+    },
+    [reload],
+  );
+
+  useEffect(() => {
+    const pending = takePendingContactSave('/outreach');
+    if (!pending) return;
+    const resumeTimer = window.setTimeout(() => {
+      void persistOutreachRole(pending.contactId, pending.payload, pending.attempts);
+    }, 0);
+    return () => window.clearTimeout(resumeTimer);
+  }, [persistOutreachRole]);
+
+  async function saveContactRole(contact: Records['contacts'][number]) {
+    await persistOutreachRole(contact.id, {
+      email: contact.email,
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      phone: contact.phone,
+      preferredChannel: contact.preferredChannel,
+      timezone: contact.timezone,
+      title: roleDraft.trim() || null,
+      type: contact.type,
+    });
+  }
+
   return (
     <>
       {message ? (
@@ -669,6 +1406,25 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
             Refresh Gmail history
           </Button>
         </div>
+        <OutreachPlanningCalendar
+          campaign={records.campaigns.find((campaign) => campaign.id === campaignId) ?? null}
+          companyContactIds={records.contacts
+            .filter((contact) => contact.organization !== null)
+            .map((contact) => contact.id)}
+          interactions={records.interactions.map((interaction) => ({
+            contactId: interaction.contact.id,
+            direction: interaction.direction,
+            occurredAt: interaction.occurredAt,
+          }))}
+          key={`${campaignId || 'general'}:${records.planningReferenceTime}`}
+          referenceTime={records.planningReferenceTime}
+          workspace={{
+            id: records.workspace.id,
+            quietHoursEnd: records.workspace.quietHoursEnd,
+            quietHoursStart: records.workspace.quietHoursStart,
+            timeZone: records.workspace.defaultTimezone,
+          }}
+        />
       </section>
       <section className="panel">
         <h2>Context for IBM Bob</h2>
@@ -694,22 +1450,31 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
           style={{ marginTop: '1rem' }}
           value={emailSignature}
         />
-        <label style={{ display: 'block', marginTop: '1rem' }}>
-          <span>Campaign context (optional)</span>
-          <select
-            className="filter-select"
-            onChange={(event) => setCampaignId(event.target.value)}
-            value={campaignId}
-          >
-            <option value="">No campaign — create an unassigned draft</option>
-            {records.campaigns.map((campaign) => (
-              <option key={campaign.id} value={campaign.id}>
-                {campaign.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {campaignId ? (
+        {records.scope.campaign ? (
+          <div className="campaign-focus-callout">
+            <strong>Campaign context: {records.scope.campaign.name}</strong>
+            <span>
+              Focused mode keeps every draft request assigned to this campaign and its contacts.
+            </span>
+          </div>
+        ) : (
+          <label style={{ display: 'block', marginTop: '1rem' }}>
+            <span>Campaign context (optional)</span>
+            <select
+              className="filter-select"
+              onChange={(event) => setCampaignId(event.target.value)}
+              value={campaignId}
+            >
+              <option value="">No campaign — create an unassigned draft</option>
+              {records.campaigns.map((campaign) => (
+                <option key={campaign.id} value={campaign.id}>
+                  {campaign.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {campaignId && !records.scope.campaign ? (
           <label style={{ display: 'block', marginTop: '0.75rem' }}>
             <input
               checked={associateWithCampaign}
@@ -736,8 +1501,39 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
           </div>
         ) : null}
       </section>
-      <section className="panel panel--flush" aria-label="Unified outreach contacts">
-        {records.contacts.map((contact) => {
+      <div className="filters-bar" aria-label="Outreach search filters">
+        <div className="filters-bar__group">
+          <label className="search-field">
+            <span className="visually-hidden">Search outreach contacts</span>
+            <Search aria-hidden size={16} />
+            <input
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search contact, company, or email"
+              type="search"
+              value={query}
+            />
+          </label>
+          <select
+            aria-label="Filter outreach contacts by company category"
+            className="filter-select"
+            onChange={(event) => setIndustry(event.target.value)}
+            value={industry}
+          >
+            <option>All categories</option>
+            {COMPANY_CATEGORIES.map((item) => (
+              <option key={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <section
+        aria-label={`${
+          records.scope.campaign?.name ?? 'Workspace'
+        } outreach contacts. Scroll within this contact window to browse results.`}
+        className="panel panel--flush record-scroll-region record-scroll-region--compact"
+        tabIndex={0}
+      >
+        {visibleContacts.map((contact) => {
           const emails = records.interactions.filter((item) => item.contact.id === contact.id);
           const followUps = records.followUps.filter((item) => item.contact.id === contact.id);
           const bobRequest = records.bobRequests.find((item) => item.contactId === contact.id);
@@ -747,7 +1543,8 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
                 <strong>
                   {contact.firstName} {contact.lastName}
                 </strong>{' '}
-                · {contact.organization?.name ?? 'No organization'} · {emails.length} tracked email
+                · {contact.organization?.name ?? 'No organization'} ·{' '}
+                {categoryDisplayLabel(contact.organization)} · {emails.length} tracked email
                 {emails.length === 1 ? '' : 's'} · {followUps.length} follow-up
                 {followUps.length === 1 ? '' : 's'}
               </summary>
@@ -755,6 +1552,59 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
                 <p>
                   {contact.email ?? 'No email'} · Consent: {contact.consentStatus}
                 </p>
+                <div className="outreach-role">
+                  <p>
+                    <strong>Person’s role:</strong> {contact.title ?? 'Not specified'}
+                  </p>
+                  <Button
+                    disabled={busy}
+                    kind="ghost"
+                    onClick={() => {
+                      setEditingRoleContactId(contact.id);
+                      setRoleDraft(contact.title ?? '');
+                    }}
+                    renderIcon={Edit}
+                    size="sm"
+                  >
+                    Edit role
+                  </Button>
+                </div>
+                {editingRoleContactId === contact.id ? (
+                  <form
+                    className="outreach-role__editor"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void saveContactRole(contact);
+                    }}
+                  >
+                    <TextInput
+                      id={`outreach-contact-${contact.id}-role`}
+                      labelText="Person’s role / title"
+                      maxLength={160}
+                      onChange={(event) => setRoleDraft(event.target.value)}
+                      value={roleDraft}
+                    />
+                    <div className="page-actions">
+                      <Button
+                        kind="secondary"
+                        onClick={() => {
+                          setEditingRoleContactId(null);
+                          setRoleDraft('');
+                        }}
+                        size="sm"
+                        type="button"
+                      >
+                        Cancel
+                      </Button>
+                      <Button disabled={busy} size="sm" type="submit">
+                        {busy ? 'Saving…' : 'Save role'}
+                      </Button>
+                    </div>
+                    <p>
+                      Imported roles write back to the exact Google Sheet source row when saved.
+                    </p>
+                  </form>
+                ) : null}
                 {followUps.map((followUp) => (
                   <p key={followUp.id}>
                     <strong>Follow-up:</strong> {new Date(followUp.dueAt).toLocaleString()} ·{' '}
@@ -898,8 +1748,12 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
             </details>
           );
         })}
-        {!records.contacts.length ? (
-          <p style={{ padding: '1.25rem' }}>No contacts yet. Import a Google Sheet first.</p>
+        {!visibleContacts.length ? (
+          <p style={{ padding: '1.25rem' }}>
+            {records.contacts.length
+              ? 'No outreach contacts match this search and category filter.'
+              : 'No contacts yet. Import a Google Sheet first.'}
+          </p>
         ) : null}
       </section>
     </>
@@ -907,178 +1761,274 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
 }
 
 function OrganizationRoster({
+  campaignFocused,
   organizations,
   trashedOrganizations,
   updateTrash,
 }: {
+  campaignFocused: boolean;
   organizations: Records['organizations'];
   trashedOrganizations: Records['trashedOrganizations'];
   updateTrash: (id: string, action: 'trash' | 'restore') => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);
+  const [industry, setIndustry] = useState('All categories');
   const [query, setQuery] = useState('');
-  const visible = organizations.filter((organization) =>
-    `${organization.name} ${organization.contacts.map((contact) => `${contact.firstName} ${contact.lastName} ${contact.email ?? ''}`).join(' ')}`
-      .toLocaleLowerCase('en-US')
-      .includes(query.toLocaleLowerCase('en-US')),
+  const [view, setView] = useState<'list' | 'industry'>('list');
+  const visible = organizations.filter(
+    (organization) =>
+      `${organization.name} ${organization.industry} ${organization.contacts.map((contact) => `${contact.firstName} ${contact.lastName} ${contact.email ?? ''}`).join(' ')}`
+        .toLocaleLowerCase('en-US')
+        .includes(query.toLocaleLowerCase('en-US')) &&
+      (industry === 'All categories' || categoryDisplayLabel(organization) === industry),
   );
+  const industryGroups = groupCompaniesByIndustry(
+    visible,
+    (organization) => categoryDisplayLabel(organization),
+    (organization) => organization._count.contacts,
+  );
+  const organizationRow = (organization: Records['organizations'][number]) => {
+    const open = expanded.includes(organization.id);
+    return (
+      <div key={organization.id}>
+        <div className="list-card">
+          <button
+            aria-expanded={open}
+            onClick={() =>
+              setExpanded((current) =>
+                current.includes(organization.id)
+                  ? current.filter((id) => id !== organization.id)
+                  : [...current, organization.id],
+              )
+            }
+            style={{
+              background: 'none',
+              border: 0,
+              cursor: 'pointer',
+              flex: 1,
+              padding: 0,
+              textAlign: 'left',
+            }}
+            type="button"
+          >
+            <h3>{organization.name}</h3>
+            <p>
+              {organization.type !== 'OTHER' ? `${organization.type} · ` : ''}
+              {categoryDisplayLabel(organization)} ·{' '}
+              {categorySourceLabel(organization.categorySource)} · {organization._count.contacts}{' '}
+              affiliated contact
+              {organization._count.contacts === 1 ? '' : 's'}
+              {organization.website ? ` · ${organization.website}` : ''} · {open ? 'hide' : 'show'}{' '}
+              contacts
+            </p>
+          </button>
+          {!campaignFocused ? (
+            <Button
+              hasIconOnly
+              iconDescription={`Move ${organization.name} to Trash`}
+              kind="ghost"
+              onClick={() => void updateTrash(organization.id, 'trash')}
+              renderIcon={TrashCan}
+              size="sm"
+              tooltipPosition="left"
+            />
+          ) : null}
+        </div>
+        {open ? (
+          <div style={{ padding: '0 1.25rem 1.25rem' }}>
+            {organization.contacts.length ? (
+              <table className="faro-table">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Affiliation / role</th>
+                    <th>Contact type</th>
+                    <th>Email</th>
+                    <th>Consent</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {organization.contacts.map((contact) => (
+                    <tr key={contact.id}>
+                      <td>
+                        <strong>
+                          {contact.firstName} {contact.lastName}
+                        </strong>
+                      </td>
+                      <td>{contact.title ?? `Affiliated with ${organization.name}`}</td>
+                      <td>{contact.type}</td>
+                      <td>{contact.email ?? 'No email'}</td>
+                      <td>{contact.consentStatus}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p>No active contacts are affiliated with this organization.</p>
+            )}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
   return (
     <>
       <div className="section-heading">
         <div>
           <h2>Active organizations</h2>
-          <p>{organizations.length} currently present in Faro or a connected Sheet</p>
-        </div>
-      </div>
-      <div className="filters-bar">
-        <label className="search-field">
-          <span className="visually-hidden">Search organizations or affiliated contacts</span>
-          <Search aria-hidden size={16} />
-          <input
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search organization, person, or email"
-            type="search"
-            value={query}
-          />
-        </label>
-      </div>
-      <section className="panel panel--flush" aria-label="Organizations and affiliated contacts">
-        {visible.map((organization) => {
-          const open = expanded.includes(organization.id);
-          return (
-            <div key={organization.id}>
-              <div className="list-card">
-                <button
-                  aria-expanded={open}
-                  onClick={() =>
-                    setExpanded((current) =>
-                      current.includes(organization.id)
-                        ? current.filter((id) => id !== organization.id)
-                        : [...current, organization.id],
-                    )
-                  }
-                  style={{
-                    background: 'none',
-                    border: 0,
-                    cursor: 'pointer',
-                    flex: 1,
-                    padding: 0,
-                    textAlign: 'left',
-                  }}
-                  type="button"
-                >
-                  <h3>{organization.name}</h3>
-                  <p>
-                    {organization.type} · {organization._count.contacts} affiliated contact
-                    {organization._count.contacts === 1 ? '' : 's'}
-                    {organization.website ? ` · ${organization.website}` : ''} ·{' '}
-                    {open ? 'hide' : 'show'} contacts
-                  </p>
-                </button>
-                <Button
-                  hasIconOnly
-                  iconDescription={`Move ${organization.name} to Trash`}
-                  kind="ghost"
-                  onClick={() => void updateTrash(organization.id, 'trash')}
-                  renderIcon={TrashCan}
-                  size="sm"
-                  tooltipPosition="left"
-                />
-              </div>
-              {open ? (
-                <div style={{ padding: '0 1.25rem 1.25rem' }}>
-                  {organization.contacts.length ? (
-                    <table className="faro-table">
-                      <thead>
-                        <tr>
-                          <th>Person</th>
-                          <th>Affiliation / role</th>
-                          <th>Contact type</th>
-                          <th>Email</th>
-                          <th>Consent</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {organization.contacts.map((contact) => (
-                          <tr key={contact.id}>
-                            <td>
-                              <strong>
-                                {contact.firstName} {contact.lastName}
-                              </strong>
-                            </td>
-                            <td>{contact.title ?? `Affiliated with ${organization.name}`}</td>
-                            <td>{contact.type}</td>
-                            <td>{contact.email ?? 'No email'}</td>
-                            <td>{contact.consentStatus}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p>No active contacts are affiliated with this organization.</p>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-        {!visible.length ? (
-          <p style={{ padding: '1.25rem' }}>
-            {organizations.length
-              ? 'No organizations or affiliated contacts match that search.'
-              : 'No active organizations yet.'}
+          <p>
+            {organizations.length} currently present in Faro or a connected Sheet, grouped by
+            canonical company category
           </p>
-        ) : null}
-      </section>
-      <section
-        className="panel panel--flush"
-        style={{ marginTop: '2rem' }}
-        aria-labelledby="organization-trash-title"
-      >
-        <div className="panel__header" style={{ padding: '1.25rem' }}>
-          <div>
-            <h2 id="organization-trash-title">Trash</h2>
-            <p>
-              Organizations removed from their connected Sheet. Returning rows are restored
-              automatically.
-            </p>
-          </div>
         </div>
-        {trashedOrganizations.length ? (
-          trashedOrganizations.map((organization) => (
-            <div className="list-card" key={organization.id}>
-              <div>
-                <h3>{organization.name}</h3>
+      </div>
+      <div className="filters-bar" aria-label="Organization search filters">
+        <div className="filters-bar__group">
+          <label className="search-field">
+            <span className="visually-hidden">Search organizations or affiliated contacts</span>
+            <Search aria-hidden size={16} />
+            <input
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search organization, person, or email"
+              type="search"
+              value={query}
+            />
+          </label>
+          <select
+            aria-label="Filter organizations by company category"
+            className="filter-select"
+            onChange={(event) => setIndustry(event.target.value)}
+            value={industry}
+          >
+            <option>All categories</option>
+            {COMPANY_CATEGORIES.map((item) => (
+              <option key={item}>{item}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <nav className="queue-tabs" aria-label="Organization views">
+        <button
+          aria-current={view === 'list' ? 'page' : undefined}
+          onClick={() => setView('list')}
+          type="button"
+        >
+          List <span>{visible.length}</span>
+        </button>
+        <button
+          aria-current={view === 'industry' ? 'page' : undefined}
+          onClick={() => setView('industry')}
+          type="button"
+        >
+          Group by category <span>{industryGroups.length}</span>
+        </button>
+      </nav>
+      {view === 'list' ? (
+        <section
+          className="panel panel--flush record-scroll-region"
+          aria-label="Organizations and affiliated contacts. Scroll within this list to browse results."
+          tabIndex={0}
+        >
+          {visible.map(organizationRow)}
+          {!visible.length ? (
+            <p style={{ padding: '1.25rem' }}>
+              {organizations.length
+                ? 'No organizations or affiliated contacts match that search.'
+                : 'No active organizations yet.'}
+            </p>
+          ) : null}
+        </section>
+      ) : (
+        <div
+          aria-label="Organizations grouped by company category. Scroll within this list to browse results."
+          className="industry-group-grid record-scroll-region"
+          role="region"
+          tabIndex={0}
+        >
+          {industryGroups.map((group) => (
+            <section className="panel panel--flush industry-group" key={group.industry}>
+              <div className="industry-group__header">
+                <div>
+                  <p className="eyebrow">Company category</p>
+                  <h3>{group.industry}</h3>
+                </div>
                 <p>
-                  {organization.type} · removed {new Date(organization.deletedAt).toLocaleString()}{' '}
-                  · {organization._count.contacts} archived contact
-                  {organization._count.contacts === 1 ? '' : 's'}
+                  <strong>{group.companyCount}</strong> companies
+                  <span>{group.contactCount} contacts</span>
                 </p>
               </div>
-              <Button
-                kind="ghost"
-                onClick={() => void updateTrash(organization.id, 'restore')}
-                renderIcon={Renew}
-                size="sm"
-              >
-                Restore
-              </Button>
+              {group.companies.map(organizationRow)}
+            </section>
+          ))}
+          {!industryGroups.length ? (
+            <section className="panel">
+              <p>No organizations or affiliated contacts match that search.</p>
+            </section>
+          ) : null}
+        </div>
+      )}
+      {!campaignFocused ? (
+        <section
+          className="panel panel--flush"
+          style={{ marginTop: '2rem' }}
+          aria-labelledby="organization-trash-title"
+        >
+          <div className="panel__header" style={{ padding: '1.25rem' }}>
+            <div>
+              <h2 id="organization-trash-title">Trash</h2>
+              <p>
+                Organizations removed from their connected Sheet. Returning rows are restored
+                automatically.
+              </p>
             </div>
-          ))
-        ) : (
-          <p style={{ padding: '1.25rem' }}>Trash is empty.</p>
-        )}
-      </section>
+          </div>
+          {trashedOrganizations.length ? (
+            <div
+              aria-label="Trashed organizations. Scroll within this list to browse results."
+              className="record-scroll-region record-scroll-region--compact"
+              role="region"
+              tabIndex={0}
+            >
+              {trashedOrganizations.map((organization) => (
+                <div className="list-card" key={organization.id}>
+                  <div>
+                    <h3>{organization.name}</h3>
+                    <p>
+                      {organization.type !== 'OTHER' ? `${organization.type} · ` : ''}
+                      {categoryDisplayLabel(organization)} · removed{' '}
+                      {new Date(organization.deletedAt).toLocaleString()} ·{' '}
+                      {organization._count.contacts} archived contact
+                      {organization._count.contacts === 1 ? '' : 's'}
+                    </p>
+                  </div>
+                  <Button
+                    kind="ghost"
+                    onClick={() => void updateTrash(organization.id, 'restore')}
+                    renderIcon={Renew}
+                    size="sm"
+                  >
+                    Restore
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ padding: '1.25rem' }}>Trash is empty.</p>
+          )}
+        </section>
+      ) : null}
     </>
   );
 }
 
 function CampaignAnalyticsView({
   campaigns,
+  organizations,
   selectedId,
   setSelectedId,
 }: {
   campaigns: CampaignAnalytics[];
+  organizations: Records['organizations'];
   selectedId: string;
   setSelectedId: (id: string) => void;
 }) {
@@ -1112,7 +2062,10 @@ function CampaignAnalyticsView({
         </label>
         <p>{campaign.objective}</p>
       </section>
-      <section className="metric-grid" aria-label={`${campaign.name} analytics`}>
+      <section
+        className="metric-grid metric-grid--compact"
+        aria-label={`${campaign.name} analytics`}
+      >
         <MetricCard
           change="associated"
           detail="campaign audience"
@@ -1142,6 +2095,26 @@ function CampaignAnalyticsView({
           value={String(campaign.followUpsOpen)}
         />
       </section>
+      <CampaignPulseChart
+        campaigns={campaigns.map((item) => ({
+          contacts: item.contacts,
+          followUpsOpen: item.followUpsOpen,
+          id: item.id,
+          name: item.name,
+          positiveResponseRate: item.positiveResponseRate,
+          responseRate: item.responseRate,
+        }))}
+        onSelectedIdChange={setSelectedId}
+        selectedId={campaign.id}
+      />
+      <CompanyCategoryGraph
+        companies={organizations.map((organization) => ({
+          contacts: organization._count.contacts,
+          id: organization.id,
+          industry: categoryDisplayLabel(organization),
+          name: organization.name,
+        }))}
+      />
       <section className="panel">
         <h2>Campaign database activity</h2>
         <p>

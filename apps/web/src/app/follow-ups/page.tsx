@@ -7,6 +7,7 @@ import {
   Edit,
   Email,
   Renew,
+  Search,
   Snooze,
   TaskComplete,
   Time,
@@ -26,7 +27,9 @@ import { useSearchParams } from 'next/navigation';
 
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
+import { COMPANY_CATEGORIES } from '@faro/core';
 import { bobDrafts, campaigns, followUps, type FollowUpRecord } from '@/lib/demo-data';
+import { isFuturePlanningInstant } from '@/lib/outreach-calendar';
 
 type QueueFilter =
   'Open' | 'Due today' | 'Overdue' | 'Awaiting IBM Bob' | 'Draft ready' | 'Completed';
@@ -52,6 +55,8 @@ function FollowUpWorkspace() {
   const searchParams = useSearchParams();
   const requestedTask = searchParams.get('task');
   const [filter, setFilter] = useState<QueueFilter>('Open');
+  const [industry, setIndustry] = useState('All categories');
+  const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState(
     followUps.some((task) => task.id === requestedTask) ? requestedTask! : followUps[0]!.id,
   );
@@ -69,8 +74,16 @@ function FollowUpWorkspace() {
   const [body, setBody] = useState(draft?.body ?? '');
 
   const visibleTasks = useMemo(
-    () => followUps.filter((task) => matchesFilter(task, filter)),
-    [filter],
+    () =>
+      followUps.filter(
+        (task) =>
+          matchesFilter(task, filter) &&
+          (industry === 'All categories' || task.industry === industry) &&
+          `${task.contact} ${task.organization} ${task.industry} ${task.campaign} ${task.reason}`
+            .toLocaleLowerCase('en-US')
+            .includes(query.toLocaleLowerCase('en-US')),
+      ),
+    [filter, industry, query],
   );
 
   function selectTask(task: FollowUpRecord) {
@@ -135,6 +148,24 @@ function FollowUpWorkspace() {
 
   const activeStatus = localStatuses[selected.id] ?? selected.statusLabel;
   const activeRequestId = requestIds[selected.id] ?? selected.bobRequestId;
+  const selectedWindowIsFuture = selected.recommendedAt
+    ? isFuturePlanningInstant(selected.recommendedAt, new Date())
+    : false;
+  const selectedWindowLabel =
+    selected.recommendedAt && !selectedWindowIsFuture
+      ? `Expired · ${new Date(selected.recommendedAt).toLocaleString()}`
+      : selected.recommendedWindow;
+
+  function acceptRecommendedWindow() {
+    if (!selected.recommendedAt || !isFuturePlanningInstant(selected.recommendedAt, new Date())) {
+      notify(
+        'That recommended send window has passed. Refresh or recalculate before scheduling outreach.',
+        'error',
+      );
+      return;
+    }
+    setRecommendationAccepted((current) => ({ ...current, [selected.id]: true }));
+  }
 
   return (
     <div className="page-shell followup-page">
@@ -192,6 +223,34 @@ function FollowUpWorkspace() {
         })}
       </nav>
 
+      <div className="filters-bar" aria-label="Follow-up search filters">
+        <div className="filters-bar__group">
+          <label className="search-field">
+            <span className="visually-hidden">Search follow-ups</span>
+            <Search aria-hidden size={16} />
+            <input
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search contact, company, or campaign"
+              type="search"
+              value={query}
+            />
+          </label>
+          <label>
+            <span className="visually-hidden">Filter follow-ups by company category</span>
+            <select
+              className="filter-select"
+              onChange={(event) => setIndustry(event.target.value)}
+              value={industry}
+            >
+              <option>All categories</option>
+              {COMPANY_CATEGORIES.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
       <div className="followup-layout">
         <section className="followup-queue" aria-labelledby="queue-title">
           <h2 className="visually-hidden" id="queue-title">
@@ -221,7 +280,7 @@ function FollowUpWorkspace() {
                     <span className="mono">{task.due}</span>
                   </span>
                   <span className="queue-item__org">
-                    {task.organization} · {task.campaign}
+                    {task.organization} · {task.industry} · {task.campaign}
                   </span>
                   <span className="queue-item__reason">{task.reason}</span>
                   <span className="queue-item__footer">
@@ -254,7 +313,7 @@ function FollowUpWorkspace() {
                 <p className="eyebrow">{selected.campaign}</p>
                 <h2 id="selected-task-title">{selected.contact}</h2>
                 <small>
-                  {selected.organization} · {selected.channel}
+                  {selected.organization} · {selected.industry} · {selected.channel}
                 </small>
               </span>
             </div>
@@ -266,14 +325,19 @@ function FollowUpWorkspace() {
 
           <div className="followup-detail__actions">
             <Button
+              disabled={!selectedWindowIsFuture}
               kind="tertiary"
-              onClick={() =>
-                setRecommendationAccepted((current) => ({ ...current, [selected.id]: true }))
-              }
+              onClick={acceptRecommendedWindow}
               renderIcon={Checkmark}
               size="sm"
             >
-              {recommendationAccepted[selected.id] ? 'Window accepted' : 'Accept window'}
+              {recommendationAccepted[selected.id]
+                ? 'Window accepted'
+                : selected.recommendedAt
+                  ? selectedWindowIsFuture
+                    ? 'Accept window'
+                    : 'Window expired'
+                  : 'No schedulable window'}
             </Button>
             <Button
               kind="ghost"
@@ -321,7 +385,7 @@ function FollowUpWorkspace() {
             <div className="detail-section__heading">
               <div>
                 <p className="eyebrow">Deterministic timing</p>
-                <h3 id="window-title">{selected.recommendedWindow}</h3>
+                <h3 id="window-title">{selectedWindowLabel}</h3>
               </div>
               <span className="confidence-score">
                 <strong>{selected.confidence}</strong>
@@ -336,6 +400,15 @@ function FollowUpWorkspace() {
               status={selected.sufficiency === 'Sparse' ? 'active' : 'finished'}
               value={selected.confidence}
             />
+            {!selectedWindowIsFuture && selected.recommendedAt ? (
+              <InlineNotification
+                hideCloseButton
+                kind="warning"
+                lowContrast
+                subtitle="Faro will not accept or schedule an outreach window at or before the current time. Refresh or recalculate to obtain a future window."
+                title="Recommended window expired"
+              />
+            ) : null}
             <p>{selected.explanation}</p>
             <div className="tag-list" aria-label="Why this window was recommended">
               {selected.reasonCodes.map((reason) => (
@@ -355,7 +428,11 @@ function FollowUpWorkspace() {
               </div>
               <div>
                 <dt>Alternatives</dt>
-                <dd>Tomorrow 10:30 AM · Fri 9:45 AM</dd>
+                <dd>
+                  {selectedWindowIsFuture
+                    ? 'Tomorrow 10:30 AM · Fri 9:45 AM'
+                    : 'Recalculate from the current time'}
+                </dd>
               </div>
             </dl>
           </section>

@@ -1,4 +1,4 @@
-import { quietHoursSchema, type QuietHours } from './contracts.js';
+import { quietHoursSchema, type QuietHours } from './contracts';
 
 interface ZonedParts {
   year: number;
@@ -50,6 +50,22 @@ function zonedParts(instant: Date, timeZone: string): ZonedParts {
 function timeToMinutes(value: string): number {
   const [hours = 0, minutes = 0] = value.split(':').map(Number);
   return hours * 60 + minutes;
+}
+
+/**
+ * Clamps an automatically scheduled notification to its scheduling boundary.
+ * User-selected outreach times should be rejected when stale; automatic internal reminders may
+ * safely become immediately due instead of being persisted as intentionally backdated work.
+ */
+export function notificationScheduledAtOrAfter(
+  requestedAt: string | Date,
+  notBefore: string | Date,
+): Date {
+  const requested = new Date(requestedAt);
+  const boundary = new Date(notBefore);
+  if (Number.isNaN(requested.getTime())) throw new Error('requestedAt must be a valid instant');
+  if (Number.isNaN(boundary.getTime())) throw new Error('notBefore must be a valid instant');
+  return new Date(Math.max(requested.getTime(), boundary.getTime()));
 }
 
 /** Returns the desired instant or the first quiet-hour boundary in the user's IANA time zone. */

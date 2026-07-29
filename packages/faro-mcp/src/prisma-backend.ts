@@ -115,7 +115,7 @@ export class PrismaBobGenerationRequestStore implements BobGenerationRequestStor
         }),
         transaction.campaign.findFirst({
           where: { id: input.campaignId, workspaceId: input.workspaceId, archivedAt: null },
-          select: { id: true },
+          select: { id: true, status: true },
         }),
         input.followUpTaskId === null
           ? Promise.resolve(null)
@@ -125,11 +125,18 @@ export class PrismaBobGenerationRequestStore implements BobGenerationRequestStor
                 workspaceId: input.workspaceId,
                 contactId: input.contactId,
                 campaignId: input.campaignId,
+                status: { in: ['OPEN', 'SNOOZED'] },
               },
               select: { id: true },
             }),
       ]);
-      if (!membership || !contact || !campaign || (input.followUpTaskId !== null && !followUp)) {
+      if (
+        !membership ||
+        !contact ||
+        !campaign ||
+        campaign.status === 'COMPLETED' ||
+        (input.followUpTaskId !== null && !followUp)
+      ) {
         throw new PrismaBobStoreError(
           'BOB_REQUEST_CONTEXT_INVALID',
           'Workspace-scoped request context or membership was not found',

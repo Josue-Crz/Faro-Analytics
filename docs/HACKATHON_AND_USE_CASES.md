@@ -89,6 +89,20 @@ data from crossing workspace boundaries.
 - **Truthful limitations:** live providers, production authentication, and external delivery are
   labeled as configured, preview-only, or planned instead of being simulated.
 
+## Submission image assets
+
+Use the checked-in, upload-ready assets for project listings:
+
+- [Faro project logo](assets/faro-project-logo.png) — 100 × 100 PNG and under 5 MB.
+- [Faro dashboard background](assets/faro-dashboard-background.png) — wide PNG and under 5 MB.
+
+The logo is rasterized from the canonical Faro lighthouse mark. The background is promotional
+project-cover artwork generated from the real seeded dashboard screenshot and is not a replacement
+for product evidence. When a submission asks for screenshots, use
+[the captured dashboard](screenshots/dashboard.png) or the other Playwright captures instead. Full
+dimensions, file sizes, provenance, and validation commands are documented in
+[Project image assets](PROJECT_ASSETS.md).
+
 ## Suggested demo narrative
 
 1. Open the seeded dashboard and explain the fragmented-outreach problem.

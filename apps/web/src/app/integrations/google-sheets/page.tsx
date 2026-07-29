@@ -15,19 +15,28 @@ import {
   ProgressIndicator,
   ProgressStep,
   TextInput,
-  Toggle,
 } from '@carbon/react';
 import { useEffect, useState } from 'react';
 
 import { PageHeader } from '@/components/PageHeader';
+import {
+  SheetConnectionsPanel,
+  type SheetConnectionRecord,
+} from '@/components/SheetConnectionsPanel';
 import { StatusBadge } from '@/components/StatusBadge';
 import { demoSheetRows, sheetSyncRuns } from '@/lib/demo-data';
+import {
+  canonicalGoogleSheetUrl,
+  connectionStatusPresentation,
+  type SheetConnectionStatus,
+} from '@/lib/sheet-connection-status';
 
 const mappings = [
   { source: 'First name', target: 'Contact.firstName', required: true },
   { source: 'Last name', target: 'Contact.lastName', required: true },
   { source: 'Email', target: 'Contact.email', required: true },
   { source: 'Organization', target: 'Organization.name', required: false },
+  { source: 'Industry', target: 'Organization.company category', required: false },
   { source: 'Type', target: 'Contact.type', required: false },
   { source: 'Timezone', target: 'Contact.timezone', required: false },
   { source: 'Preferred channel', target: 'Contact.preferredChannel', required: true },
@@ -41,6 +50,12 @@ const apiMappings = [
   {
     sourceColumn: 'Organization',
     targetField: 'organizationName',
+    required: false,
+    transformation: 'TRIM',
+  },
+  {
+    sourceColumn: 'Industry',
+    targetField: 'organizationIndustry',
     required: false,
     transformation: 'TRIM',
   },
@@ -94,6 +109,11 @@ interface SheetHistoryEvent {
   source: string;
 }
 
+interface ConnectionCheck {
+  status: SheetConnectionStatus;
+  url: string;
+}
+
 const canonicalTargets = [
   ['fullName', 'Full name'],
   ['firstName', 'First name'],
@@ -102,6 +122,7 @@ const canonicalTargets = [
   ['phone', 'Phone'],
   ['title', 'Job title'],
   ['organizationName', 'Organization'],
+  ['organizationIndustry', 'Company category'],
   ['externalId', 'External ID'],
   ['timezone', 'Timezone'],
   ['preferredChannel', 'Preferred channel'],
@@ -120,12 +141,18 @@ export default function GoogleSheetsPage() {
   const [sheetRange, setSheetRange] = useState('A1:ZZ1001');
   const [worksheetTitle, setWorksheetTitle] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [connections, setConnections] = useState<SheetConnectionRecord[]>([]);
+  const [connectionCheck, setConnectionCheck] = useState<ConnectionCheck | null>(null);
   const [liveRows, setLiveRows] = useState<Record<string, string>[] | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [worksheets, setWorksheets] = useState<Array<{ sheetId: number; title: string }>>([]);
   const [liveMappings, setLiveMappings] = useState<LiveMapping[]>([]);
   const [livePreview, setLivePreview] = useState<LivePreview | null>(null);
   const [sheetHistory, setSheetHistory] = useState<SheetHistoryEvent[]>([]);
+  const [selectedConnectionId, setSelectedConnectionId] = useState('');
+  const writeBackEnabled = connections.some(
+    (connection) => connection.writeBackEnabled && connection.syncDirection === 'BIDIRECTIONAL',
+  );
 
   useEffect(() => {
     void fetch('/api/auth/session', { cache: 'no-store' })
@@ -139,21 +166,68 @@ export default function GoogleSheetsPage() {
 
   useEffect(() => {
     if (!connected) return;
-    void fetch('/api/sheets/history', { cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('history');
-        return (await response.json()) as { data: SheetHistoryEvent[] };
+    void Promise.all([
+      fetch('/api/sheets/history', { cache: 'no-store' }),
+      fetch('/api/sheets/connections', { cache: 'no-store' }),
+    ])
+      .then(async ([historyResponse, connectionResponse]) => {
+        if (!historyResponse.ok || !connectionResponse.ok) throw new Error('sheet-state');
+        const [history, connectionResult] = (await Promise.all([
+          historyResponse.json(),
+          connectionResponse.json(),
+        ])) as [{ data: SheetHistoryEvent[] }, { data: SheetConnectionRecord[] }];
+        return { connections: connectionResult.data, history: history.data };
       })
-      .then((result) => setSheetHistory(result.data))
+      .then((result) => {
+        setConnections(result.connections);
+        setSelectedConnectionId((current) =>
+          result.connections.some((connection) => connection.id === current)
+            ? current
+            : (result.connections[0]?.id ?? ''),
+        );
+        setSheetHistory(result.history);
+      })
       .catch(() => undefined);
   }, [connected, syncMessage]);
+
+  async function refreshConnections(preferredId?: string) {
+    const response = await fetch('/api/sheets/connections', { cache: 'no-store' });
+    if (!response.ok) return;
+    const result = (await response.json()) as { data: SheetConnectionRecord[] };
+    setConnections(result.data);
+    setSelectedConnectionId((current) => {
+      if (preferredId && result.data.some((connection) => connection.id === preferredId)) {
+        return preferredId;
+      }
+      return result.data.some((connection) => connection.id === current)
+        ? current
+        : (result.data[0]?.id ?? '');
+    });
+  }
 
   function normalizedSpreadsheetId() {
     return spreadsheetId.match(/\/spreadsheets\/d\/([\w-]+)/)?.[1] ?? spreadsheetId.trim();
   }
 
+  function connectionUrl() {
+    return canonicalGoogleSheetUrl(normalizedSpreadsheetId());
+  }
+
+  function selectConnection(connection: SheetConnectionRecord) {
+    setSelectedConnectionId(connection.id);
+    setConnectionCheck({ status: connection.status, url: connection.url });
+    setDisplayName(connection.displayName);
+    setSheetRange(connection.readRange);
+    setSpreadsheetId(connection.url);
+    setWorksheetTitle(connection.worksheetId);
+    setLiveRows(null);
+    setLivePreview(null);
+    setWorksheets([]);
+  }
+
   async function findWorksheets() {
     setPreviewError(null);
+    setConnectionCheck({ status: 'ATTEMPTING', url: connectionUrl() });
     const response = await fetch('/api/sheets/metadata', {
       body: JSON.stringify({ spreadsheetId: normalizedSpreadsheetId() }),
       headers: { 'content-type': 'application/json' },
@@ -164,6 +238,7 @@ export default function GoogleSheetsPage() {
       error?: string;
     };
     if (!response.ok || !result.data) {
+      setConnectionCheck({ status: 'SYNC_ISSUE', url: connectionUrl() });
       setPreviewError(
         `Faro could not inspect that spreadsheet (${result.error ?? 'unknown error'}).`,
       );
@@ -172,6 +247,7 @@ export default function GoogleSheetsPage() {
     setDisplayName((current) => current || result.data!.spreadsheetTitle);
     setWorksheets(result.data.worksheets);
     setWorksheetTitle((current) => current || result.data!.worksheets[0]?.title || '');
+    setConnectionCheck({ status: 'CONNECTED', url: connectionUrl() });
   }
 
   async function validateLiveSheet(rows: Record<string, string>[], mappings: LiveMapping[]) {
@@ -193,6 +269,7 @@ export default function GoogleSheetsPage() {
   async function readGoogleSheet() {
     setPreviewError(null);
     const normalizedId = normalizedSpreadsheetId();
+    setConnectionCheck({ status: 'ATTEMPTING', url: connectionUrl() });
     const response = await fetch('/api/sheets/read', {
       body: JSON.stringify({
         range: sheetRange,
@@ -207,6 +284,7 @@ export default function GoogleSheetsPage() {
       error?: string;
     };
     if (!response.ok || !result.data) {
+      setConnectionCheck({ status: 'SYNC_ISSUE', url: connectionUrl() });
       setPreviewError(
         `Faro could not read that Google Sheet (${result.error ?? 'unknown error'}).`,
       );
@@ -214,6 +292,7 @@ export default function GoogleSheetsPage() {
     }
     setLiveRows(result.data.rows);
     setLiveMappings(result.data.inferredMappings);
+    setConnectionCheck({ status: 'CONNECTED', url: connectionUrl() });
     await validateLiveSheet(result.data.rows, result.data.inferredMappings);
     setSyncMessage(
       `Read ${result.data.rows.length} Google Sheet rows. No Faro records were changed.`,
@@ -224,6 +303,7 @@ export default function GoogleSheetsPage() {
     setPreviewError(null);
     setSyncing(true);
     const normalizedId = normalizedSpreadsheetId();
+    setConnectionCheck({ status: 'ATTEMPTING', url: connectionUrl() });
     const response = await fetch('/api/sheets/sync', {
       body: JSON.stringify({
         displayName: displayName || 'Connected Google Sheet',
@@ -242,23 +322,31 @@ export default function GoogleSheetsPage() {
         archivedContacts: number;
         archivedOrganizations: number;
         followUpsPending: number;
+        organizationsCategorized: number;
+        organizationsClassifiedByName: number;
+        organizationsClassifiedByWikidata: number;
+        organizationsUncategorized: number;
         rowsCreated: number;
         rowsFailed: number;
         rowsRead: number;
         rowsUpdated: number;
+        connectionId: string;
       };
       error?: string;
     };
     setSyncing(false);
     if (!response.ok || !result.data) {
+      setConnectionCheck({ status: 'SYNC_ISSUE', url: connectionUrl() });
       setPreviewError(
         `Faro could not import the Sheet (${result.error ?? 'unknown error'}). The last successful database snapshot was kept.`,
       );
       return;
     }
+    setConnectionCheck({ status: 'CONNECTED', url: connectionUrl() });
     setSyncMessage(
-      `Database sync complete: ${result.data.rowsRead} rows read, ${result.data.rowsCreated} created, ${result.data.rowsUpdated} updated, ${result.data.rowsFailed} needing review, ${result.data.followUpsPending} follow-up dates pending campaign assignment, and ${result.data.archivedOrganizations} removed organizations moved to Trash.`,
+      `Database sync complete: ${result.data.rowsRead} rows read, ${result.data.rowsCreated} created, ${result.data.rowsUpdated} updated, ${result.data.rowsFailed} needing review, ${result.data.organizationsCategorized} companies categorized (${result.data.organizationsClassifiedByWikidata} verified through Wikidata and ${result.data.organizationsClassifiedByName} by bounded name/domain rules), ${result.data.organizationsUncategorized} awaiting a specific category, ${result.data.followUpsPending} follow-up dates pending campaign assignment, and ${result.data.archivedOrganizations} removed organizations moved to Trash.`,
     );
+    await refreshConnections(result.data.connectionId);
   }
 
   async function previewSheet(showRunSummary = false) {
@@ -296,6 +384,10 @@ export default function GoogleSheetsPage() {
     }
   }
 
+  const connectionCheckPresentation = connectionCheck
+    ? connectionStatusPresentation(connectionCheck.status)
+    : null;
+
   return (
     <div className="page-shell">
       <PageHeader
@@ -328,7 +420,7 @@ export default function GoogleSheetsPage() {
         }
         subtitle={
           connected
-            ? 'Your tokens are encrypted at rest. Live spreadsheet selection remains disabled until a connection is explicitly selected.'
+            ? 'Your tokens are encrypted at rest. Saved Sheet tabs below show their canonical URL and current validity.'
             : fallback
               ? 'The preview below is fictional and local. Retry OAuth to return to a clean connected workspace.'
               : 'No contacts, organizations, campaigns, or follow-ups are loaded before authentication.'
@@ -336,17 +428,25 @@ export default function GoogleSheetsPage() {
       />
 
       {connected ? (
+        <SheetConnectionsPanel
+          connections={connections}
+          onSelect={selectConnection}
+          selectedId={selectedConnectionId}
+        />
+      ) : null}
+
+      {connected ? (
         <section className="panel" aria-labelledby="live-sheet-title">
           <div className="panel__header">
             <div>
               <h2 id="live-sheet-title">Read an existing spreadsheet</h2>
               <p>
-                Paste a spreadsheet URL or ID. Faro requests read-only access and performs no
-                write-back.
+                Paste a spreadsheet URL or ID. Faro imports mapped records and writes explicit
+                contact edits back to their exact source rows.
               </p>
             </div>
           </div>
-          <div className="sheet-preview-actions">
+          <div className="sheet-connection-form">
             <TextInput
               id="spreadsheet-name"
               labelText="Connection name"
@@ -357,7 +457,13 @@ export default function GoogleSheetsPage() {
             <TextInput
               id="spreadsheet-id"
               labelText="Spreadsheet URL or ID"
-              onChange={(event) => setSpreadsheetId(event.target.value)}
+              onChange={(event) => {
+                setSpreadsheetId(event.target.value);
+                setConnectionCheck(null);
+                setLiveRows(null);
+                setLivePreview(null);
+                setWorksheets([]);
+              }}
               value={spreadsheetId}
             />
             <Button
@@ -409,6 +515,23 @@ export default function GoogleSheetsPage() {
               Read sheet
             </Button>
           </div>
+          {connectionCheck && connectionCheckPresentation ? (
+            <div
+              aria-live="polite"
+              className={`sheet-url-validation sheet-url-validation--${connectionCheckPresentation.signal}`}
+            >
+              <span>
+                <small>Google Sheet URL</small>
+                <a href={connectionCheck.url} rel="noreferrer" target="_blank">
+                  {connectionCheck.url}
+                </a>
+              </span>
+              <StatusBadge
+                label={connectionCheckPresentation.label}
+                status={connectionCheckPresentation.signal}
+              />
+            </div>
+          ) : null}
           {previewError ? (
             <InlineNotification
               hideCloseButton
@@ -523,9 +646,11 @@ export default function GoogleSheetsPage() {
         <section className="panel panel--flush table-wrap" aria-labelledby="live-history-title">
           <div className="panel__header" style={{ padding: '1.25rem' }}>
             <div>
-              <h2 id="live-history-title">Google Sheet read history</h2>
+              <h2 id="live-history-title">Google Sheet read and sync audit</h2>
               <p>
-                Workspace audit showing when a Sheet was read or synchronized and who triggered it.
+                User reads and manual syncs stay visible here. Automatic activity appears only in
+                the disposable poll log above, where each Sheet URL is limited to its newest 10
+                entries.
               </p>
             </div>
           </div>
@@ -568,7 +693,7 @@ export default function GoogleSheetsPage() {
           <div className="panel__header">
             <div>
               <h2>OAuth connection</h2>
-              <p>Least-privilege read-only scope</p>
+              <p>Mapped spreadsheet read and contact-edit access</p>
             </div>
             <StatusBadge
               label={connected ? 'Connected' : 'Not connected'}
@@ -577,7 +702,7 @@ export default function GoogleSheetsPage() {
           </div>
           <p className="integration-card-copy">
             {connected
-              ? 'Google granted identity and read-only spreadsheet access for this tester.'
+              ? 'Google granted identity access. Reconnect once if an existing connection still needs spreadsheet edit permission.'
               : 'No Google account is connected. Faro does not store fixture credentials or claim a live sync.'}
           </p>
           <code className="config-key">GOOGLE_CLIENT_ID</code>
@@ -600,15 +725,22 @@ export default function GoogleSheetsPage() {
           <div className="panel__header">
             <div>
               <h2>Safe write-back</h2>
-              <p>Explicit opt-in only</p>
+              <p>Explicit user edits only</p>
             </div>
-            <StatusBadge label="Disabled" status="clear" />
+            <StatusBadge
+              label={writeBackEnabled ? 'Enabled' : 'Reconnect required'}
+              status={writeBackEnabled ? 'ready' : 'attention'}
+            />
           </div>
           <p className="integration-card-copy">
-            Faro will never write to a sheet unless a workspace admin enables a mapped write-back
-            policy.
+            Saving an imported contact updates its mapped source row with formula protection and an
+            audit event. Polling never writes to Google Sheets.
           </p>
-          <Toggle id="write-back-toggle" labelA="Disabled" labelB="Enabled" disabled />
+          {!writeBackEnabled && connected ? (
+            <Button href="/api/auth/google/start?returnTo=/integrations/google-sheets" kind="ghost">
+              Reconnect for edit access
+            </Button>
+          ) : null}
         </article>
       </div>
 

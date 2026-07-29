@@ -12,6 +12,7 @@ export interface MappedContact {
   preferredChannel?: string;
   type?: string;
   organizationName?: string;
+  organizationIndustry?: string;
   externalId?: string;
   tags?: string[];
   consentStatus?: string;
@@ -63,7 +64,11 @@ const HEADER_ALIASES: Readonly<Record<string, TargetContactField>> = {
   contactemail: 'email',
   phone: 'phone',
   phonenumber: 'phone',
+  contactrole: 'title',
   jobtitle: 'title',
+  jobrole: 'title',
+  position: 'title',
+  role: 'title',
   title: 'title',
   timezone: 'timezone',
   preferredchannel: 'preferredChannel',
@@ -73,6 +78,22 @@ const HEADER_ALIASES: Readonly<Record<string, TargetContactField>> = {
   companyname: 'organizationName',
   organizationname: 'organizationName',
   sponsor: 'organizationName',
+  industry: 'organizationIndustry',
+  companyindustry: 'organizationIndustry',
+  organizationindustry: 'organizationIndustry',
+  sector: 'organizationIndustry',
+  businesscategory: 'organizationIndustry',
+  companycategory: 'organizationIndustry',
+  companysector: 'organizationIndustry',
+  companyvertical: 'organizationIndustry',
+  crunchbasecategory: 'organizationIndustry',
+  crunchbasecategories: 'organizationIndustry',
+  gicsindustry: 'organizationIndustry',
+  gicssector: 'organizationIndustry',
+  linkedinindustry: 'organizationIndustry',
+  naicsdescription: 'organizationIndustry',
+  organizationcategory: 'organizationIndustry',
+  sicdescription: 'organizationIndustry',
   externalid: 'externalId',
   tags: 'tags',
   consent: 'consentStatus',
@@ -105,6 +126,19 @@ function inferredTransformation(
     return 'UPPERCASE';
   if (targetField === 'tags') return 'SPLIT_COMMA';
   return 'TRIM';
+}
+
+const CONTACT_ROLE_HEADERS = new Set(['contactrole', 'jobrole', 'jobtitle', 'position', 'role']);
+
+export function canonicalizeContactRoleMapping(
+  mappings: readonly SheetFieldMapping[],
+): SheetFieldMapping[] {
+  if (mappings.some((mapping) => mapping.targetField === 'title')) return [...mappings];
+  return mappings.map((mapping) =>
+    CONTACT_ROLE_HEADERS.has(normalizedHeader(mapping.sourceColumn))
+      ? { ...mapping, targetField: 'title', transformation: 'TRIM' }
+      : mapping,
+  );
 }
 
 export function inferHeaderMappings(headers: string[]): InferredSheetFieldMapping[] {

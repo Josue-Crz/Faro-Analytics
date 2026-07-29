@@ -17,7 +17,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const { id } = await context.params;
   const contact = await prisma.contact.findFirst({
     select: { id: true },
-    where: { deletedAt: null, id, workspaceId: session.workspaceId },
+    where: {
+      campaignContacts: session.focusedCampaignId
+        ? {
+            some: {
+              campaignId: session.focusedCampaignId,
+              workspaceId: session.workspaceId,
+            },
+          }
+        : undefined,
+      deletedAt: null,
+      id,
+      workspaceId: session.workspaceId,
+    },
   });
   if (!contact) return NextResponse.json({ error: 'CONTACT_NOT_FOUND' }, { status: 404 });
   await prisma.$transaction([

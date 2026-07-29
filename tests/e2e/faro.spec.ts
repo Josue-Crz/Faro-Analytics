@@ -3,10 +3,15 @@ import { expect, test } from '@playwright/test';
 
 test('dashboard starts with an honest empty workspace', async ({ page }) => {
   await page.goto('/dashboard');
-  await expect(page.getByRole('heading', { level: 1, name: 'Welcome to Faro' })).toBeVisible();
-  await expect(page.getByText('No fictional records are loaded')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Turn outreach into a clear next action' }),
+  ).toBeVisible();
+  await expect(page.getByText('Your workspace starts empty')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 2, name: 'Know who needs you next—and why.' }),
+  ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
-  await expect(page.getByText('Good morning, Jordan')).toHaveCount(0);
+  await expect(page.getByText('Know who needs you next', { exact: true })).toHaveCount(0);
 });
 
 test('Google Sheets setup does not expose fixture data before sign-in', async ({ page }) => {
@@ -34,9 +39,53 @@ test('contact routes do not disclose records without a session', async ({ page }
 });
 
 test('workspace API rejects unauthenticated access', async ({ request }) => {
-  const response = await request.get('/api/workspace/records');
-  expect(response.status()).toBe(401);
-  await expect(response.json()).resolves.toMatchObject({ error: 'AUTHENTICATION_REQUIRED' });
+  const [
+    records,
+    context,
+    focusUpdate,
+    campaign,
+    campaignUpdate,
+    campaignDelete,
+    sheetConnections,
+    contactUpdate,
+  ] = await Promise.all([
+    request.get('/api/workspace/records'),
+    request.get('/api/workspace/context?campaignId=campaign-untrusted'),
+    request.patch('/api/workspace/context', {
+      data: { campaignId: 'campaign-untrusted' },
+    }),
+    request.get('/api/campaigns/campaign-untrusted'),
+    request.patch('/api/campaigns/campaign-untrusted', {
+      data: { action: 'COMPLETE' },
+    }),
+    request.delete('/api/campaigns/campaign-untrusted'),
+    request.get('/api/sheets/connections'),
+    request.patch('/api/contacts/contact-untrusted', {
+      data: {
+        email: 'untrusted@example.test',
+        firstName: 'Untrusted',
+        lastName: 'Caller',
+        phone: null,
+        preferredChannel: 'EMAIL',
+        timezone: 'UTC',
+        title: null,
+        type: 'OTHER',
+      },
+    }),
+  ]);
+  for (const response of [
+    records,
+    context,
+    focusUpdate,
+    campaign,
+    campaignUpdate,
+    campaignDelete,
+    sheetConnections,
+    contactUpdate,
+  ]) {
+    expect(response.status()).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({ error: 'AUTHENTICATION_REQUIRED' });
+  }
 });
 
 test('Bob generation API rejects unauthenticated access', async ({ request }) => {
@@ -45,6 +94,25 @@ test('Bob generation API rejects unauthenticated access', async ({ request }) =>
   });
   expect(response.status()).toBe(503);
   await expect(response.json()).resolves.toMatchObject({ error: 'PRODUCTION_AUTH_REQUIRED' });
+});
+
+test('notification APIs reject unauthenticated access', async ({ request }) => {
+  const [center, preferences, verification] = await Promise.all([
+    request.get('/api/notifications'),
+    request.patch('/api/settings/notifications', { data: {} }),
+    request.post('/api/settings/notifications/sms/start', {
+      data: { phone: '+14155550123' },
+    }),
+  ]);
+
+  expect(center.status()).toBe(401);
+  expect(preferences.status()).toBe(401);
+  expect(verification.status()).toBe(401);
+});
+
+test('notification scheduler rejects an untrusted caller', async ({ request }) => {
+  const response = await request.post('/api/cron/notifications');
+  expect([401, 503]).toContain(response.status());
 });
 
 test('empty follow-up setup has no critical accessibility violations', async ({ page }) => {

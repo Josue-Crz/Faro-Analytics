@@ -20,6 +20,10 @@ export type FaroSession = {
   workspaceId: string;
 };
 
+export type AuthenticatedFaroSession = FaroSession & {
+  focusedCampaignId: string | null;
+};
+
 function secret(name: 'AUTH_SECRET' | 'TOKEN_ENCRYPTION_KEY'): string {
   const value = process.env[name]?.trim();
   if (!value || value.startsWith('replace-with-')) {
@@ -125,13 +129,16 @@ export function clearSessionCookie(response: NextResponse) {
   response.cookies.delete(SESSION_COOKIE);
 }
 
-export async function sessionFromRequest(request: NextRequest): Promise<FaroSession | null> {
+export async function sessionFromRequest(
+  request: NextRequest,
+): Promise<AuthenticatedFaroSession | null> {
   const session = decodeSigned<FaroSession>(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session || session.expiresAt <= Date.now()) return null;
   const membership = await prisma.membership.findUnique({
+    select: { focusedCampaignId: true },
     where: { workspaceId_userId: { userId: session.userId, workspaceId: session.workspaceId } },
   });
-  return membership ? session : null;
+  return membership ? { ...session, focusedCampaignId: membership.focusedCampaignId } : null;
 }
 
 export function isTesterAllowed(email: string): boolean {

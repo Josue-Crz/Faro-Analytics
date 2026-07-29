@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { SheetFieldMapping, SheetScope } from './contracts';
 import { FixtureGoogleSheetsClient } from './fixture-client';
-import { inferHeaderMappings, suggestHeaderMappings } from './mapping';
+import {
+  canonicalizeContactRoleMapping,
+  inferHeaderMappings,
+  suggestHeaderMappings,
+} from './mapping';
 import { previewContactImport } from './preview';
 import { protectFormulaCell } from './writeback';
 
@@ -41,11 +45,57 @@ const mappings: SheetFieldMapping[] = [
 ];
 
 describe('Google Sheets mapping', () => {
+  it('maps a person role column to the canonical contact title', () => {
+    expect(inferHeaderMappings(['Contact Role'])[0]).toMatchObject({
+      confidence: 'HIGH',
+      sourceColumn: 'Contact Role',
+      targetField: 'title',
+    });
+  });
+
+  it('upgrades a stored custom Contact Role mapping without overriding an explicit title', () => {
+    expect(
+      canonicalizeContactRoleMapping([
+        {
+          required: false,
+          sourceColumn: 'Contact Role',
+          targetField: 'customFields.Contact_Role_3',
+          transformation: 'TRIM',
+        },
+      ]),
+    ).toEqual([
+      expect.objectContaining({
+        sourceColumn: 'Contact Role',
+        targetField: 'title',
+      }),
+    ]);
+  });
+
   it('suggests common header mappings without mapping a target twice', () => {
-    expect(suggestHeaderMappings(['Email', 'Email Address', 'Company'])).toEqual([
+    expect(suggestHeaderMappings(['Email', 'Email Address', 'Company', 'Industry'])).toEqual([
       expect.objectContaining({ sourceColumn: 'Email', targetField: 'email' }),
       expect.objectContaining({ sourceColumn: 'Company', targetField: 'organizationName' }),
+      expect.objectContaining({
+        sourceColumn: 'Industry',
+        targetField: 'organizationIndustry',
+      }),
     ]);
+  });
+
+  it('recognizes third-party company taxonomy headers without mapping a target twice', () => {
+    const inferred = inferHeaderMappings([
+      'Company',
+      'GICS Sector',
+      'NAICS Description',
+      'LinkedIn Industry',
+    ]);
+
+    expect(inferred[1]).toMatchObject({
+      confidence: 'HIGH',
+      targetField: 'organizationIndustry',
+    });
+    expect(inferred[2]?.targetField).toMatch(/^customFields\./);
+    expect(inferred[3]?.targetField).toMatch(/^customFields\./);
   });
 
   it('infers a combined name and preserves unfamiliar columns as custom fields', () => {

@@ -57,7 +57,8 @@ permission.
    or sign out of Faro and reconnect. This makes Google show the updated Gmail permission.
 3. Click **Connect Google account**.
 4. Select your tester Google account.
-5. Read the consent screen. You should see Google Sheets read access and Gmail read-only access.
+5. Read the consent screen. You should see Google Sheets read/edit access for explicit contact
+   write-back and Gmail read-only access.
 6. Click **Allow**.
 7. After you return to Faro, open **Outreach** in the left sidebar.
 8. Click **Refresh Gmail history**.
@@ -115,8 +116,8 @@ same Outreach card.
    curl -fsSL https://bob.ibm.com/download/bobshell.sh | bash -s -- --pm npm
    ```
 
-2. In the IBM Bob web dashboard, create or use an active **Inference** API key. This is not the
-   Bob IDE MCP setting.
+2. Confirm the IBM Bob plan/entitlement is active, then create or use an **Inference** API key. This
+   is not the Bob IDE MCP setting, and a saved key does not prove the subscription is active.
 3. In Faro's ignored repository-root `.env`, add your key (never commit it):
 
    ```dotenv
@@ -134,6 +135,20 @@ same Outreach card.
 If Bob Shell is missing, its key is invalid, or Bob returns invalid draft data, Faro marks that
 request as failed and leaves any existing data unchanged. It never sends an email; the returned
 draft still requires your review before use.
+
+If the card reports `BOB_SHELL_FAILED`, run this from the same repository shell:
+
+```bash
+bob --chat-mode ask --hide-intermediary-output --max-coins 2 \
+  -p "Reply with exactly OK and do not use tools."
+```
+
+The command invokes IBM Bob and may consume a small amount of entitlement, but it exposes the
+provider-safe reason that Faro intentionally omits from the browser. A suspended plan must be
+reactivated in the [IBM dashboard](https://myibm.ibm.com/dashboard) before Faro can receive a draft.
+If you replace the key, update `.env` and restart `pnpm dev`; if IBM reactivates the same key/plan,
+request a new draft without restarting. See the
+[full Bob Shell troubleshooting table](IBM_BOB_WORKFLOW.md#troubleshoot-local-bob-shell).
 
 ## What Faro does and does not do
 

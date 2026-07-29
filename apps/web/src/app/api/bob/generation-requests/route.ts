@@ -16,6 +16,7 @@ import { isDemoApiAccessAllowed } from '@/lib/server/demo-boundary';
 import { checkRateLimit } from '@/lib/server/rate-limit';
 import { sessionFromRequest } from '@/lib/server/auth';
 import { completeWithLocalBobShell } from '@/lib/server/bob-shell';
+import { isCampaignContactSourceEligible } from '@/lib/server/campaign-data-source';
 
 const createRequestSchema = z
   .object({
@@ -87,7 +88,22 @@ export async function POST(request: NextRequest) {
   let followUpTaskId: string | null;
   let selectedCampaignId: string;
   if (session) {
+    if (
+      session.focusedCampaignId &&
+      parsed.data.campaignId &&
+      parsed.data.campaignId !== session.focusedCampaignId
+    ) {
+      return NextResponse.json(
+        {
+          error: 'WORKSPACE_FOCUS_CONFLICT',
+          message:
+            'This app is focused on another campaign. Switch campaign focus before requesting this draft.',
+        },
+        { status: 409 },
+      );
+    }
     selectedCampaignId =
+      session.focusedCampaignId ??
       parsed.data.campaignId ??
       (
         await prisma.campaign.upsert({
@@ -144,6 +160,7 @@ export async function POST(request: NextRequest) {
         },
         take: 20,
         where: {
+          campaignId: session.focusedCampaignId ?? undefined,
           channel: 'EMAIL',
           contactId: parsed.data.contactId,
           workspaceId,
@@ -153,6 +170,12 @@ export async function POST(request: NextRequest) {
     if (!contact || !campaign || (parsed.data.followUpTaskId && !followUp)) {
       return NextResponse.json({ error: 'CONTEXT_NOT_FOUND' }, { status: 404 });
     }
+    if (campaign.status === 'COMPLETED') {
+      return NextResponse.json(
+        { error: 'CAMPAIGN_COMPLETED', message: 'Completed campaigns cannot create new drafts.' },
+        { status: 409 },
+      );
+    }
     if (
       contact.suppressedAt ||
       (contact.consentStatus !== 'OPTED_IN' && contact.consentStatus !== 'IMPLIED')
@@ -161,6 +184,40 @@ export async function POST(request: NextRequest) {
         {
           error: contact.suppressedAt ? 'CONTACT_SUPPRESSED' : 'CONSENT_UNVERIFIED',
           message: 'A human must confirm the outreach basis before IBM Bob may draft.',
+        },
+        { status: 409 },
+      );
+    }
+    const campaignMembership =
+      parsed.data.campaignId || session.focusedCampaignId
+        ? await prisma.campaignContact.findFirst({
+            select: { contactId: true },
+            where: {
+              campaignId: campaign.id,
+              contactId: contact.id,
+              workspaceId,
+            },
+          })
+        : null;
+    if (session.focusedCampaignId && !campaignMembership) {
+      return NextResponse.json(
+        {
+          error: 'CAMPAIGN_CONTACT_REQUIRED',
+          message: 'Focused mode can draft only for contacts assigned to this campaign.',
+        },
+        { status: 409 },
+      );
+    }
+    if (
+      (parsed.data.campaignId || session.focusedCampaignId) &&
+      !campaignMembership &&
+      !isCampaignContactSourceEligible(contact.source, campaign.sheetConnectionId)
+    ) {
+      return NextResponse.json(
+        {
+          error: 'CAMPAIGN_SOURCE_MISMATCH',
+          message:
+            'Open the campaign and choose a contact from its associated data source before requesting a draft.',
         },
         { status: 409 },
       );

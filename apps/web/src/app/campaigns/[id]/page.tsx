@@ -1,12 +1,14 @@
 'use client';
 
-import { ArrowLeft, ArrowRight, Download, UserFollow } from '@carbon/icons-react';
+import { ArrowLeft, ArrowRight, Download, Search, UserFollow } from '@carbon/icons-react';
 import { Button, ProgressBar } from '@carbon/react';
 import Link from 'next/link';
 import { notFound, useParams } from 'next/navigation';
+import { useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/PageHeader';
 import { StatusBadge } from '@/components/StatusBadge';
+import { COMPANY_CATEGORIES } from '@faro/core';
 import { campaigns, contacts, followUps, responseFunnel } from '@/lib/demo-data';
 
 export default function CampaignDetailPage() {
@@ -16,6 +18,19 @@ export default function CampaignDetailPage() {
   const campaignContacts = contacts.filter((contact) => contact.campaign === campaign.name);
   const campaignTasks = followUps.filter(
     (task) => task.campaign === campaign.name && task.dueGroup !== 'Completed',
+  );
+  const [industry, setIndustry] = useState('All categories');
+  const [query, setQuery] = useState('');
+  const visibleCampaignContacts = useMemo(
+    () =>
+      campaignContacts.filter(
+        (contact) =>
+          (industry === 'All categories' || contact.industry === industry) &&
+          `${contact.name} ${contact.organization} ${contact.industry} ${contact.title}`
+            .toLocaleLowerCase('en-US')
+            .includes(query.toLocaleLowerCase('en-US')),
+      ),
+    [campaignContacts, industry, query],
   );
 
   return (
@@ -144,19 +159,45 @@ export default function CampaignDetailPage() {
             <p>Stage, latest touch, and next action</p>
           </div>
         </div>
+        <div className="filters-bar">
+          <div className="filters-bar__group">
+            <label className="search-field">
+              <span className="visually-hidden">Search campaign contacts</span>
+              <Search aria-hidden size={16} />
+              <input
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search contact or company"
+                type="search"
+                value={query}
+              />
+            </label>
+            <select
+              aria-label="Filter campaign contacts by company category"
+              className="filter-select"
+              onChange={(event) => setIndustry(event.target.value)}
+              value={industry}
+            >
+              <option>All categories</option>
+              {COMPANY_CATEGORIES.map((item) => (
+                <option key={item}>{item}</option>
+              ))}
+            </select>
+          </div>
+        </div>
         <table className="faro-table">
           <caption className="visually-hidden">Contacts participating in this campaign</caption>
           <thead>
             <tr>
               <th>Contact</th>
               <th>Organization</th>
+              <th>Company category</th>
               <th>Stage</th>
               <th>Last interaction</th>
               <th>Next action</th>
             </tr>
           </thead>
           <tbody>
-            {campaignContacts.map((contact) => (
+            {visibleCampaignContacts.map((contact) => (
               <tr key={contact.id}>
                 <td>
                   <div className="contact-cell">
@@ -165,11 +206,17 @@ export default function CampaignDetailPage() {
                   </div>
                 </td>
                 <td>{contact.organization}</td>
+                <td>{contact.industry}</td>
                 <td>{contact.stage}</td>
                 <td>{contact.lastInteraction}</td>
                 <td>{contact.nextAction}</td>
               </tr>
             ))}
+            {!visibleCampaignContacts.length ? (
+              <tr>
+                <td colSpan={6}>No campaign contacts match this search and category filter.</td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </section>

@@ -6,22 +6,67 @@ import { z } from 'zod';
 
 import { sessionFromRequest } from '@/lib/server/auth';
 
-const campaignSchema = z.object({
-  name: z.string().trim().min(1).max(160),
-  objective: z.string().trim().min(1).max(2_000),
-  type: z.enum([
-    'SPONSORSHIP',
-    'PARTICIPANT_OUTREACH',
-    'PARTNERSHIP',
-    'FUNDRAISING',
-    'EVENT',
-    'COMMUNITY',
-  ]),
-});
+const campaignSchema = z
+  .object({
+    name: z.string().trim().min(1).max(160),
+    objective: z.string().trim().min(1).max(2_000),
+    sheetConnectionId: z.string().trim().min(1).max(160).nullable().optional(),
+    type: z.enum([
+      'SPONSORSHIP',
+      'PARTICIPANT_OUTREACH',
+      'PARTNERSHIP',
+      'FUNDRAISING',
+      'EVENT',
+      'COMMUNITY',
+    ]),
+  })
+  .strict();
+
+function categoryMetadata(customFields: unknown) {
+  if (!customFields || typeof customFields !== 'object' || Array.isArray(customFields)) {
+    return { categoryConfidence: null, categorySource: null };
+  }
+  const classification = (customFields as Record<string, unknown>).industryClassification;
+  if (!classification || typeof classification !== 'object' || Array.isArray(classification)) {
+    return { categoryConfidence: null, categorySource: null };
+  }
+  const values = classification as Record<string, unknown>;
+  return {
+    categoryConfidence:
+      values.confidence === 'HIGH' || values.confidence === 'MEDIUM' || values.confidence === 'LOW'
+        ? values.confidence
+        : null,
+    categorySource:
+      values.source === 'SOURCE_FIELD' ||
+      values.source === 'THIRD_PARTY_CONTEXT' ||
+      values.source === 'WIKIDATA' ||
+      values.source === 'NAME_OR_DOMAIN' ||
+      values.source === 'BEST_EFFORT' ||
+      values.source === 'FALLBACK'
+        ? values.source
+        : null,
+  };
+}
 
 export async function GET(request: NextRequest) {
   const session = await sessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
+  const focusedCampaignId = session.focusedCampaignId;
+  const campaignContactFilter = focusedCampaignId
+    ? {
+        campaignContacts: {
+          some: {
+            campaignId: focusedCampaignId,
+            workspaceId: session.workspaceId,
+          },
+        },
+      }
+    : {};
+  const scopedContactFilter = {
+    deletedAt: null,
+    workspaceId: session.workspaceId,
+    ...campaignContactFilter,
+  };
   const [
     contacts,
     organizations,
@@ -30,6 +75,8 @@ export async function GET(request: NextRequest) {
     followUps,
     interactions,
     bobRequests,
+    workspace,
+    dataSources,
   ] = await Promise.all([
     prisma.contact.findMany({
       orderBy: { updatedAt: 'desc' },
@@ -40,17 +87,40 @@ export async function GET(request: NextRequest) {
         firstName: true,
         id: true,
         lastName: true,
-        organization: { select: { name: true } },
+        organization: { select: { industry: true, name: true, type: true, website: true } },
+        phone: true,
+        preferredChannel: true,
         source: true,
+        timezone: true,
+        title: true,
         type: true,
+        updatedAt: true,
       },
       take: 1_000,
-      where: { deletedAt: null, workspaceId: session.workspaceId },
+      where: scopedContactFilter,
     }),
     prisma.organization.findMany({
       orderBy: { updatedAt: 'desc' },
       select: {
-        _count: { select: { contacts: { where: { deletedAt: null } } } },
+        _count: {
+          select: {
+            contacts: {
+              where: {
+                deletedAt: null,
+                ...(focusedCampaignId
+                  ? {
+                      campaignContacts: {
+                        some: {
+                          campaignId: focusedCampaignId,
+                          workspaceId: session.workspaceId,
+                        },
+                      },
+                    }
+                  : {}),
+              },
+            },
+          },
+        },
         contacts: {
           orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
           select: {
@@ -62,37 +132,86 @@ export async function GET(request: NextRequest) {
             title: true,
             type: true,
           },
-          where: { deletedAt: null },
+          where: {
+            deletedAt: null,
+            ...(focusedCampaignId
+              ? {
+                  campaignContacts: {
+                    some: {
+                      campaignId: focusedCampaignId,
+                      workspaceId: session.workspaceId,
+                    },
+                  },
+                }
+              : {}),
+          },
         },
+        customFields: true,
         id: true,
+        industry: true,
         name: true,
         type: true,
         website: true,
       },
       take: 1_000,
-      where: { deletedAt: null, workspaceId: session.workspaceId },
-    }),
-    prisma.organization.findMany({
-      orderBy: { deletedAt: 'desc' },
-      select: {
-        _count: { select: { contacts: true } },
-        deletedAt: true,
-        id: true,
-        name: true,
-        type: true,
-        website: true,
+      where: {
+        deletedAt: null,
+        workspaceId: session.workspaceId,
+        ...(focusedCampaignId
+          ? {
+              contacts: {
+                some: {
+                  campaignContacts: {
+                    some: {
+                      campaignId: focusedCampaignId,
+                      workspaceId: session.workspaceId,
+                    },
+                  },
+                  deletedAt: null,
+                },
+              },
+            }
+          : {}),
       },
-      take: 1_000,
-      where: { deletedAt: { not: null }, workspaceId: session.workspaceId },
     }),
+    focusedCampaignId
+      ? Promise.resolve([])
+      : prisma.organization.findMany({
+          orderBy: { deletedAt: 'desc' },
+          select: {
+            _count: { select: { contacts: true } },
+            customFields: true,
+            deletedAt: true,
+            id: true,
+            industry: true,
+            name: true,
+            type: true,
+            website: true,
+          },
+          take: 1_000,
+          where: { deletedAt: { not: null }, workspaceId: session.workspaceId },
+        }),
     prisma.campaign.findMany({
       orderBy: { updatedAt: 'desc' },
       select: {
         _count: { select: { campaignContacts: true, followUpTasks: true } },
-        campaignContacts: { select: { contactId: true } },
+        endAt: true,
         id: true,
         name: true,
         objective: true,
+        sheetConnection: {
+          select: {
+            displayName: true,
+            id: true,
+            lastSyncedAt: true,
+            readRange: true,
+            schedule: true,
+            status: true,
+            worksheetId: true,
+          },
+        },
+        sheetConnectionId: true,
+        startAt: true,
         status: true,
         type: true,
       },
@@ -102,7 +221,15 @@ export async function GET(request: NextRequest) {
     prisma.followUpTask.findMany({
       orderBy: { dueAt: 'asc' },
       select: {
-        contact: { select: { firstName: true, id: true, lastName: true } },
+        campaign: { select: { id: true, name: true } },
+        contact: {
+          select: {
+            firstName: true,
+            id: true,
+            lastName: true,
+            organization: { select: { industry: true, name: true, type: true, website: true } },
+          },
+        },
         dueAt: true,
         id: true,
         priority: true,
@@ -110,7 +237,10 @@ export async function GET(request: NextRequest) {
         status: true,
       },
       take: 1_000,
-      where: { workspaceId: session.workspaceId },
+      where: {
+        campaignId: focusedCampaignId ?? undefined,
+        workspaceId: session.workspaceId,
+      },
     }),
     prisma.interaction.findMany({
       orderBy: { occurredAt: 'desc' },
@@ -124,7 +254,11 @@ export async function GET(request: NextRequest) {
         subject: true,
       },
       take: 500,
-      where: { channel: 'EMAIL', workspaceId: session.workspaceId },
+      where: {
+        campaignId: focusedCampaignId ?? undefined,
+        channel: 'EMAIL',
+        workspaceId: session.workspaceId,
+      },
     }),
     prisma.bobGenerationRequest.findMany({
       orderBy: { requestedAt: 'desc' },
@@ -136,9 +270,41 @@ export async function GET(request: NextRequest) {
         status: true,
       },
       take: 100,
+      where: {
+        campaignId: focusedCampaignId ?? undefined,
+        workspaceId: session.workspaceId,
+      },
+    }),
+    prisma.workspace.findUnique({
+      select: {
+        defaultTimezone: true,
+        id: true,
+        name: true,
+        quietHoursEnd: true,
+        quietHoursStart: true,
+        slug: true,
+      },
+      where: { id: session.workspaceId },
+    }),
+    prisma.sheetConnection.findMany({
+      orderBy: [{ lastSyncedAt: 'desc' }, { updatedAt: 'desc' }],
+      select: {
+        displayName: true,
+        id: true,
+        lastSyncedAt: true,
+        readRange: true,
+        schedule: true,
+        status: true,
+        worksheetId: true,
+      },
+      take: 100,
       where: { workspaceId: session.workspaceId },
     }),
   ]);
+  if (!workspace) return NextResponse.json({ error: 'WORKSPACE_NOT_FOUND' }, { status: 404 });
+  const focusedCampaign = focusedCampaignId
+    ? (campaigns.find((campaign) => campaign.id === focusedCampaignId) ?? null)
+    : null;
   const importedFollowUps = contacts.flatMap((contact) => {
     const fields = contact.customFields as Record<string, unknown>;
     return fields.importedFollowUpPending === true && typeof fields.importedFollowUpAt === 'string'
@@ -156,11 +322,24 @@ export async function GET(request: NextRequest) {
       campaigns,
       bobRequests,
       contacts,
+      dataSources,
       followUps,
       importedFollowUps,
       interactions,
-      organizations,
-      trashedOrganizations,
+      organizations: organizations.map(({ customFields, ...organization }) => ({
+        ...organization,
+        ...categoryMetadata(customFields),
+      })),
+      planningReferenceTime: new Date().toISOString(),
+      scope: {
+        campaign: focusedCampaign ? { id: focusedCampaign.id, name: focusedCampaign.name } : null,
+        kind: focusedCampaign ? 'CAMPAIGN' : 'WORKSPACE',
+      },
+      trashedOrganizations: trashedOrganizations.map(({ customFields, ...organization }) => ({
+        ...organization,
+        ...categoryMetadata(customFields),
+      })),
+      workspace,
     },
   });
 }
@@ -170,6 +349,14 @@ export async function POST(request: NextRequest) {
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
   const parsed = campaignSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: 'INVALID_CAMPAIGN' }, { status: 400 });
+  const sheetConnectionId = parsed.data.sheetConnectionId ?? null;
+  if (sheetConnectionId) {
+    const source = await prisma.sheetConnection.findFirst({
+      select: { id: true },
+      where: { id: sheetConnectionId, workspaceId: session.workspaceId },
+    });
+    if (!source) return NextResponse.json({ error: 'DATA_SOURCE_NOT_FOUND' }, { status: 404 });
+  }
   const campaign = await prisma.campaign.create({
     data: {
       defaultTone: 'PROFESSIONAL',
@@ -180,6 +367,7 @@ export async function POST(request: NextRequest) {
       objective: parsed.data.objective,
       ownerId: session.userId,
       quietHours: {},
+      sheetConnectionId,
       status: 'DRAFT',
       type: parsed.data.type,
       workspaceId: session.workspaceId,
@@ -194,7 +382,7 @@ export async function POST(request: NextRequest) {
       entityId: campaign.id,
       entityType: 'Campaign',
       id: randomUUID(),
-      metadata: {},
+      metadata: { sheetConnectionId },
       workspaceId: session.workspaceId,
     },
   });
