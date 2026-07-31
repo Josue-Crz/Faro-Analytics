@@ -312,9 +312,10 @@ tester access, secret generation, and deployment preflight.
 
 ## How IBM Bob was used
 
-IBM Bob is Faro’s only runtime AI provider. It is used to turn already-approved relationship facts
-into a structured outreach draft; it is not used to choose the recipient, calculate the outreach
-window, override consent, approve a message, or send external communication.
+Faro uses IBM Bob to automate the first draft of follow-up emails. Bob turns approved relationship
+details into a subject and message for a person to review, edit, and approve before sending.
+
+### Technical implementation
 
 The implemented workflow is:
 
