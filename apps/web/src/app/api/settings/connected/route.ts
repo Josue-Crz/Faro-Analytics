@@ -99,6 +99,7 @@ export async function GET(request: NextRequest) {
   if (!workspace || !membership || !userRecord)
     return NextResponse.json({ error: 'WORKSPACE_NOT_FOUND' }, { status: 404 });
   const providerState = smsProviderState();
+  const preferences = notificationPreferences(userRecord.notificationPreferences, workspace);
   return NextResponse.json({
     data: {
       bob: {
@@ -115,10 +116,15 @@ export async function GET(request: NextRequest) {
       membership: { counts: memberCounts, role: membership.role },
       notifications,
       notificationAdapter: providerState.adapter,
-      notificationPreferences: notificationPreferences(
-        userRecord.notificationPreferences,
-        workspace,
-      ),
+      notificationPreferences: {
+        ...preferences,
+        sms: Boolean(
+          userRecord.smsPhone &&
+          userRecord.smsVerifiedAt &&
+          userRecord.smsConsentAt &&
+          !userRecord.smsOptedOutAt,
+        ),
+      },
       sms: {
         consentAt: userRecord.smsConsentAt,
         optedOutAt: userRecord.smsOptedOutAt,

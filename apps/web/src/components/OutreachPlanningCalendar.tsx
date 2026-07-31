@@ -1,15 +1,18 @@
 'use client';
 
-import { Calendar, ChevronLeft, ChevronRight, Time } from '@carbon/icons-react';
+import { Calendar, ChevronLeft, ChevronRight, Launch, Time } from '@carbon/icons-react';
 import { Button } from '@carbon/react';
 import { useEffect, useMemo, useState } from 'react';
 
 import {
   calendarMonth,
   companyOutreachDaySignals,
+  companyOutreachHistory,
   currentPlanningReferenceTime,
   dateInTimeZone,
   generalCompanyOutreachPlan,
+  OUTREACH_TIMING_BENCHMARK,
+  outreachBenchmarkAlignment,
   type OutreachCalendarInteraction,
 } from '@/lib/outreach-calendar';
 
@@ -18,6 +21,14 @@ interface OutreachPlanningCalendarProps {
   companyContactIds: string[];
   interactions: OutreachCalendarInteraction[];
   referenceTime: string;
+  schedules: Array<{
+    campaignId: string;
+    contactId: string;
+    contactName: string;
+    dueAt: string;
+    id: string;
+    initialAt: string;
+  }>;
   workspace: {
     id: string;
     quietHoursEnd: string;
@@ -61,6 +72,7 @@ export function OutreachPlanningCalendar({
   companyContactIds,
   interactions,
   referenceTime,
+  schedules,
   workspace,
 }: OutreachPlanningCalendarProps) {
   const [observedCurrentTime, setObservedCurrentTime] = useState(() => Date.parse(referenceTime));
@@ -88,6 +100,13 @@ export function OutreachPlanningCalendar({
     [activeReferenceTime, campaign, companyContactIds, interactions, workspace],
   );
   const plan = useMemo(() => generalCompanyOutreachPlan(planningInput), [planningInput]);
+  const historicalOutcomes = useMemo(
+    () => companyOutreachHistory(interactions, companyContactIds, workspace.timeZone),
+    [companyContactIds, interactions, workspace.timeZone],
+  );
+  const historicalReplies = historicalOutcomes.filter((outcome) => outcome.respondedAt).length;
+  const benchmarkAlignment =
+    plan.status === 'RECOMMENDED' ? outreachBenchmarkAlignment(plan.primary.contactLocal) : null;
   const initialDate =
     plan.status === 'RECOMMENDED'
       ? plan.primary.contactLocal.date
@@ -124,6 +143,28 @@ export function OutreachPlanningCalendar({
   const selectedDay = days.find((day) => day.date === selectedDate);
   const selectedSignal = signalsByDate.get(selectedDate);
   const selectedWindows = windowsByDate.get(selectedDate) ?? [];
+  const scheduledEvents = schedules.flatMap((schedule) => [
+    {
+      at: schedule.initialAt,
+      contactId: schedule.contactId,
+      contactName: schedule.contactName,
+      id: `${schedule.id}:initial`,
+      kind: 'Initial contact' as const,
+    },
+    {
+      at: schedule.dueAt,
+      contactId: schedule.contactId,
+      contactName: schedule.contactName,
+      id: `${schedule.id}:follow-up`,
+      kind: 'Follow-up' as const,
+    },
+  ]);
+  const scheduleByDate = new Map<string, typeof scheduledEvents>();
+  for (const event of scheduledEvents) {
+    const date = dateInTimeZone(event.at, workspace.timeZone);
+    scheduleByDate.set(date, [...(scheduleByDate.get(date) ?? []), event]);
+  }
+  const selectedScheduledEvents = scheduleByDate.get(selectedDate) ?? [];
   const monthLabel = new Intl.DateTimeFormat('en-US', {
     month: 'long',
     timeZone: 'UTC',
@@ -249,6 +290,7 @@ export function OutreachPlanningCalendar({
                 {days.slice(rowIndex * 7, rowIndex * 7 + 7).map((day) => {
                   const signal = signalsByDate.get(day.date);
                   const dateWindows = windowsByDate.get(day.date) ?? [];
+                  const dateSchedule = scheduleByDate.get(day.date) ?? [];
                   const primaryDay =
                     plan.status === 'RECOMMENDED' && day.date === plan.primary.contactLocal.date;
                   const alternativeRanks = dateWindows
@@ -259,6 +301,11 @@ export function OutreachPlanningCalendar({
                     signal ? `${signal.label}, opportunity score ${signal.score} out of 100` : null,
                     primaryDay ? 'best outreach window' : null,
                     alternativeRanks.length ? `alternative ${alternativeRanks.join(', ')}` : null,
+                    dateSchedule.length
+                      ? `${dateSchedule.length} assigned outreach ${
+                          dateSchedule.length === 1 ? 'event' : 'events'
+                        }`
+                      : null,
                     day.quarterMarker,
                     day.trackedEmails
                       ? `${day.trackedEmails} tracked email${day.trackedEmails === 1 ? '' : 's'}`
@@ -295,6 +342,11 @@ export function OutreachPlanningCalendar({
                             Alt {alternativeRanks.join('/')}
                           </span>
                         ) : null}
+                        {dateSchedule.length ? (
+                          <span className="outreach-calendar__schedule">
+                            {dateSchedule.length} assigned
+                          </span>
+                        ) : null}
                         {day.quarterMarker ? (
                           <span className="outreach-calendar__quarter">{day.quarterMarker}</span>
                         ) : null}
@@ -315,6 +367,7 @@ export function OutreachPlanningCalendar({
 
       <div className="outreach-calendar__legend" aria-label="Calendar legend">
         <span>Best / Alt tags · optimizer-selected send windows</span>
+        <span>Assigned · saved initial contacts and follow-ups</span>
         <span>Q begins / Q ends · quarter boundary</span>
         <span>Email count · tracked activity</span>
       </div>
@@ -352,6 +405,32 @@ export function OutreachPlanningCalendar({
         ) : (
           <p>No optimized window is assigned to this day.</p>
         )}
+        {selectedScheduledEvents.length ? (
+          <>
+            <h5>Assigned contact schedule</h5>
+            <ul>
+              {selectedScheduledEvents.map((event) => (
+                <li key={event.id}>
+                  <Time aria-hidden size={16} />
+                  <strong>{event.kind}:</strong>{' '}
+                  <a href={`#outreach-contact-${encodeURIComponent(event.contactId)}`}>
+                    {event.contactName}
+                  </a>{' '}
+                  ·{' '}
+                  <time dateTime={event.at}>
+                    {new Intl.DateTimeFormat('en-US', {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      timeZone: workspace.timeZone,
+                    }).format(new Date(event.at))}
+                  </time>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p>No saved contact outreach is assigned to this day.</p>
+        )}
         <p>
           {selectedDay?.quarterMarker ? `${selectedDay.quarterMarker}. ` : ''}
           {selectedDay?.trackedEmails
@@ -374,8 +453,8 @@ export function OutreachPlanningCalendar({
             </ul>
             <dl className="outreach-calendar__evidence">
               <div>
-                <dt>Confidence</dt>
-                <dd>{Math.round(plan.confidence * 100)}%</dd>
+                <dt>Evidence confidence</dt>
+                <dd>{Math.round(plan.confidence * 100)}% · not reply probability</dd>
               </div>
               <div>
                 <dt>Data sufficiency</dt>
@@ -390,6 +469,80 @@ export function OutreachPlanningCalendar({
                 <dd>{plan.algorithmVersion}</dd>
               </div>
             </dl>
+            <section
+              aria-labelledby="outreach-evidence-title"
+              className="outreach-calendar__source"
+            >
+              <div className="outreach-calendar__source-heading">
+                <div>
+                  <p className="eyebrow">Independent benchmark</p>
+                  <h4 id="outreach-evidence-title">
+                    Why this recommendation is evidence-supported
+                  </h4>
+                </div>
+                <a
+                  aria-label={`Read ${OUTREACH_TIMING_BENCHMARK.title} from ${OUTREACH_TIMING_BENCHMARK.publisher} (opens in a new tab)`}
+                  href={OUTREACH_TIMING_BENCHMARK.href}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  View source
+                  <Launch aria-hidden size={16} />
+                </a>
+              </div>
+              <p>
+                In <cite>{OUTREACH_TIMING_BENCHMARK.title}</cite>, Mailchimp’s system-wide analysis
+                of engagement across billions of email addresses reports that Tuesday–Thursday
+                commonly perform well and that the typical optimum clusters around 10:00 AM in the
+                recipient’s own time zone. It also says no single day wins for every audience.
+              </p>
+              <ol className="outreach-calendar__reasoning">
+                <li>
+                  <strong>External prior.</strong> Faro starts with the same conservative pattern:
+                  weekday business hours, with the strongest day colors in the mid-week range and
+                  the optimizer’s highest default time quality around mid-morning.
+                </li>
+                <li>
+                  <strong>Recommendation check.</strong>{' '}
+                  <span
+                    className={`status-badge status-badge--${
+                      benchmarkAlignment?.dayAligned && benchmarkAlignment.timeAligned
+                        ? 'clear'
+                        : 'attention'
+                    }`}
+                  >
+                    {benchmarkAlignment?.label}
+                  </span>{' '}
+                  The selected window is {plan.primary.contactLocal.weekday} at{' '}
+                  {timeLabel(plan.primary.contactLocal.time)} in{' '}
+                  {plan.primary.contactLocal.timeZone}. When it differs from the aggregate
+                  benchmark, tracked reply timing, the current time, quiet hours, or the campaign
+                  deadline explains the override.
+                </li>
+                <li>
+                  <strong>Workspace evidence.</strong> Faro matched {historicalOutcomes.length}{' '}
+                  tracked company send{historicalOutcomes.length === 1 ? '' : 's'} to{' '}
+                  {historicalReplies} later repl{historicalReplies === 1 ? 'y' : 'ies'}. These
+                  observations adjust the external baseline only with smoothed day-and-hour
+                  evidence; missing history is shown as insufficient instead of being invented.
+                </li>
+                <li>
+                  <strong>Feasibility check.</strong> Algorithm {plan.algorithmVersion} evaluated{' '}
+                  {plan.reproducibility.evaluatedCandidates.toLocaleString('en-US')} future
+                  half-hour candidates, excluded configured quiet hours
+                  {campaign?.endAt ? ' and post-deadline times' : ''}, then returned the highest
+                  deterministic score plus spaced alternatives.
+                </li>
+              </ol>
+              <p className="outreach-calendar__accuracy-boundary">
+                <strong>Accuracy boundary:</strong> this is an evidence-supported ranking, not a
+                measured probability that a contact will reply. The cited source covers aggregate
+                marketing-email engagement, not this workspace’s one-to-one sponsorship outreach.
+                Faro’s quarter-boundary boost is a planning heuristic, not a Mailchimp finding.
+                Validate the recommendation against your own reply outcomes or a controlled timing
+                test as more data arrives.
+              </p>
+            </section>
           </>
         ) : (
           <>

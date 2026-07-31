@@ -28,11 +28,16 @@ OAuth tokens and raw worksheets are never placed in Bob prompts.
 - Successful authentication starts clean. Fictional records appear only after an explicit OAuth
   failure.
 - Near-real-time polling through `pnpm worker`, with a configurable interval and overlap guard.
+- Automatic optimizer schedule assignment through the same worker cadence. Eligible contacts in
+  draft or active campaigns receive both an initial contact and a cooldown-safe follow-up date.
 - Deterministic company categorization on every successful import or poll, including normalization
   of common third-party taxonomy columns and bounded company-name/domain inference.
 - Workspace- and campaign-scoped manual contact editing from both Contacts and Outreach. An
   imported contact edit writes to its exact mapped source row before Faro saves the local manual
   override; database-only contacts remain local because they have no Sheet row.
+- Manual or optimizer-assigned contact schedules write `Initial Contact Date` and `Follow-Up Date`
+  as date-time cells on the exact source row. The spreadsheet timezone is used for display and
+  converted back to the same UTC instants during polling.
 - Optional campaign-to-source association. A campaign opened from **Campaigns** exposes contacts
   from its exact Sheet source plus manually managed database records; it rejects another Sheet's
   contacts.
@@ -102,8 +107,19 @@ two contacts. Positional roles, phone numbers, and external IDs are also applied
 Unmatched names or identifiers remain visible as row errors rather than being guessed.
 
 The signed-in Google identity becomes the internal owner of imported records. Recognized follow-up
-dates are preserved as pending work. The user creates a campaign and explicitly assigns those
-pending dates before Faro creates campaign membership or active follow-up tasks.
+dates are preserved as pending work. Faro also recognizes `Initial Date`, `Initial Outreach Date`,
+`Initial Contact Date`, `Initial Contact At`, `Follow-Up Initial Date`, and `Follow-Up Start Date`.
+If the row has only a follow-up date, the
+import timestamp becomes the initial date, clamped to the follow-up date for overdue rows. The user
+creates a campaign and explicitly assigns both dates before Faro creates campaign membership or an
+active follow-up task.
+
+Every imported contact also receives a required future contact action immediately. Because a new
+Sheet contact starts with unknown consent, that first action is a dated outreach-basis review.
+After a person confirms consent, Faro deterministically assigns an initial-outreach date or, when
+outbound history already exists, a follow-up date. A future imported follow-up date is preserved;
+an expired imported date is replaced by a future operational date rather than activated as overdue
+work. See [Contact scheduling](CONTACT_SCHEDULING.md).
 
 Users can edit a contact's name, email, phone, person's role/title, timezone, type, and preferred
 channel from the connected Contacts directory, and edit the person's role from Outreach. For
@@ -142,14 +158,15 @@ The production adapter must implement this sequence before live synchronization 
    transactional.
 5. Create a campaign workspace yourself, choose its Sheet source, and open it; import does not
    invent a campaign.
-6. Add source-eligible contacts inside the campaign, then assign preserved follow-up dates from the
-   Follow-ups page.
+6. Add source-eligible contacts inside the campaign. Faro immediately attempts to optimize and
+   write both dates; use Contacts, the campaign, or Outreach to replace them manually.
 7. Open **Contacts → Recently imported** and review each imported contact's outreach basis.
-8. Open the campaign to queue an eligible assigned contact for Bob. Bob retrieves the governed
+8. Confirm that each contact now shows a future initial-outreach, follow-up, or review date.
+9. Open the campaign to queue an eligible assigned contact for Bob. Bob retrieves the governed
    request from Faro MCP.
-9. Refresh from the dashboard, reconnect OAuth, or call the cron endpoint with
-   `FARO_SYNC_CRON_SECRET`.
-10. If refresh fails, inspect the connection error; Faro continues showing the last successful
+10. Refresh from the dashboard, reconnect OAuth, or call the Sheet and schedule cron endpoints with
+    `FARO_SYNC_CRON_SECRET`.
+11. If refresh fails, inspect the connection error; Faro continues showing the last successful
     database snapshot.
 
 Only a successful Sheet read triggers removal reconciliation. Faro never permanently deletes a
@@ -174,18 +191,20 @@ FARO_SYNC_CRON_SECRET="replace-with-a-random-secret"
 FARO_SHEET_POLL_INTERVAL_MS="30000"
 ```
 
-Run the web app and `pnpm worker` in separate processes. The worker immediately refreshes and then
-polls every 30 seconds. Faro enforces a 15-second minimum and prevents overlapping polls. Each read
-or sync is recorded under **Google Sheet read and sync audit** with its actor and trigger. This is
-near-real-time, not instantaneous. A later public deployment may replace polling with Google Drive
-change notifications after adding the required Drive metadata scope, HTTPS webhook verification,
-channel renewal, and change-token persistence.
+Run the web app and `pnpm worker` in separate processes. The worker immediately refreshes Sheets
+and missing outreach schedules, then polls both protected endpoints every 30 seconds. Faro enforces
+a 15-second minimum and prevents overlapping polls. Each read or sync is recorded under **Google
+Sheet read and sync audit** with its actor and trigger. This is near-real-time, not instantaneous.
+A later public deployment may replace polling with Google Drive change notifications after adding
+the required Drive metadata scope, HTTPS webhook verification, channel renewal, and change-token
+persistence.
 
 The Sheet tab shows the newest 10 automatic poll attempts for that specific connection. This
 operational log is intentionally bounded; the separate read/sync security audit remains durable and
 workspace-scoped.
 
-Write-back runs only after an authenticated user explicitly saves an imported contact. It is
-limited to that contact's stored source row and mapped editable fields, records a separate audit
-event, and escapes text beginning with `=`, `+`, `-`, or `@` to prevent spreadsheet formula
-execution. Existing read-only connections require one Google reconnect before the first edit.
+Write-back runs after an authenticated user explicitly saves an imported contact or schedule, and
+when the worker assigns or rolls forward an optimizer schedule. It is limited to that contact's
+stored source row and mapped fields, records a separate audit event, and escapes edited text
+beginning with `=`, `+`, `-`, or `@` to prevent spreadsheet formula execution. Existing read-only
+connections require one Google reconnect before the first write.

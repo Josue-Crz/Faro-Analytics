@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 import { sessionFromRequest } from '@/lib/server/auth';
+import { recalculateContactNextActionInTransaction } from '@/lib/server/contact-next-action';
 import {
   contactEditableFieldsSchema,
   withContactManualOverrides,
@@ -156,6 +157,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
           firstName: true,
           id: true,
           lastName: true,
+          nextActionAt: true,
+          nextActionType: true,
           phone: true,
           preferredChannel: true,
           source: true,
@@ -205,6 +208,17 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
             workspaceId: session.workspaceId,
           },
         });
+      }
+      const schedule = await recalculateContactNextActionInTransaction(
+        database,
+        session.workspaceId,
+        id,
+        new Date(),
+        { actorId: session.userId, actorType: 'USER' },
+      );
+      if (schedule) {
+        saved.nextActionAt = schedule.nextActionAt;
+        saved.nextActionType = schedule.nextActionType;
       }
       return saved;
     });

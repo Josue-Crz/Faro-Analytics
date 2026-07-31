@@ -69,10 +69,10 @@ export default function AnalyticsPage() {
         }
         description="Understand which outreach earns meaningful responses, where follow-up converts, and how the sponsorship pipeline is moving."
         eyebrow="Jun 11 – Jul 10, 2026 · All campaigns"
-        title="Analytics (Soon)"
+        title="Analytics"
       />
 
-      <section className="metric-grid metric-grid--compact" aria-label="Analytics (Soon) summary">
+      <section className="metric-grid metric-grid--compact" aria-label="Analytics summary">
         {analyticsMetrics.map((metric) => (
           <MetricCard {...metric} key={metric.label} />
         ))}

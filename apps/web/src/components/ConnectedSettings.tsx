@@ -249,6 +249,7 @@ function NotificationSettings({ data }: { data: SettingsData }) {
   const [verificationSent, setVerificationSent] = useState(false);
   const [verifiedAt, setVerifiedAt] = useState(data.sms.verifiedAt);
   const [verifiedPhone, setVerifiedPhone] = useState(data.sms.phoneMasked);
+  const [smsOptedOutAt, setSmsOptedOutAt] = useState(data.sms.optedOutAt);
 
   function setPreference<Key extends keyof typeof preferences>(
     key: Key,
@@ -314,6 +315,7 @@ function NotificationSettings({ data }: { data: SettingsData }) {
     }
     setVerifiedAt(result.data.verifiedAt);
     setVerifiedPhone(result.data.phoneMasked);
+    setSmsOptedOutAt(null);
     setPreferences(result.data.preferences);
     setVerificationSent(false);
     setCode('');
@@ -321,7 +323,23 @@ function NotificationSettings({ data }: { data: SettingsData }) {
     setMessage('Mobile number verified and SMS follow-up reminders enabled.');
   }
 
-  const smsReady = data.sms.providerConfigured && Boolean(verifiedAt);
+  async function disableSms() {
+    setMessage(null);
+    const response = await fetch('/api/settings/notifications/sms/opt-out', { method: 'POST' });
+    const result = (await response.json().catch(() => null)) as {
+      data?: { optedOutAt: string; preferences: typeof preferences };
+      message?: string;
+    } | null;
+    if (!response.ok || !result?.data) {
+      setMessage(result?.message ?? 'Faro could not disable SMS reminders.');
+      return;
+    }
+    setSmsOptedOutAt(result.data.optedOutAt);
+    setPreferences(result.data.preferences);
+    setMessage('SMS reminders disabled and scheduled messages cancelled.');
+  }
+
+  const smsReady = data.sms.providerConfigured && Boolean(verifiedAt) && !smsOptedOutAt;
   return (
     <div className="page-shell">
       <PageHeader
@@ -410,27 +428,24 @@ function NotificationSettings({ data }: { data: SettingsData }) {
             </div>
             <div>
               <span>
-                <strong id="connected-notify-sms-label">SMS follow-up alerts</strong>
+                <strong>Required follow-up SMS</strong>
                 <small>
                   {smsReady
-                    ? `Verified recipient ${verifiedPhone}`
-                    : 'Requires Twilio and a verified mobile number'}
+                    ? `Every due follow-up alerts ${verifiedPhone}`
+                    : 'Configure Twilio and verify a mobile number to activate required alerts'}
                 </small>
               </span>
-              <Toggle
-                aria-labelledby="connected-notify-sms-label"
-                disabled={!smsReady}
-                id="connected-notify-sms"
-                labelA="Off"
-                labelB="On"
-                onToggle={(value) => setPreference('sms', value)}
-                toggled={smsReady && preferences.sms}
+              <StatusBadge
+                label={smsReady ? 'Active' : 'Setup required'}
+                status={smsReady ? 'ready' : 'attention'}
               />
             </div>
             <div>
               <span>
                 <strong id="connected-notify-priority-label">High-priority tasks only</strong>
-                <small>Limit alerts to high and urgent follow-ups</small>
+                <small>
+                  Limit optional in-app and email previews; required SMS still covers all
+                </small>
               </span>
               <Toggle
                 aria-labelledby="connected-notify-priority-label"
@@ -487,12 +502,18 @@ function NotificationSettings({ data }: { data: SettingsData }) {
           <div>
             <p className="eyebrow">SMS recipient</p>
             <h2 id="sms-verification-title">
-              {verifiedAt ? 'Verified mobile number' : 'Verify your mobile number'}
+              {smsOptedOutAt
+                ? 'SMS reminders disabled'
+                : verifiedAt
+                  ? 'Verified mobile number'
+                  : 'Verify your mobile number'}
             </h2>
             <p>
-              {verifiedAt
-                ? `${verifiedPhone} verified ${new Date(verifiedAt).toLocaleDateString()}`
-                : 'Faro uses Twilio Verify to confirm that the number belongs to you.'}
+              {smsOptedOutAt
+                ? `Consent withdrawn ${new Date(smsOptedOutAt).toLocaleDateString()}. Re-verify to activate required SMS again.`
+                : verifiedAt
+                  ? `${verifiedPhone} verified ${new Date(verifiedAt).toLocaleDateString()}`
+                  : 'Faro uses Twilio Verify to confirm that the number belongs to you.'}
             </p>
           </div>
           <Phone size={24} />
@@ -526,11 +547,16 @@ function NotificationSettings({ data }: { data: SettingsData }) {
               </Button>
             </>
           ) : null}
+          {verifiedAt && !smsOptedOutAt ? (
+            <Button kind="danger--tertiary" onClick={() => void disableSms()}>
+              Disable SMS reminders
+            </Button>
+          ) : null}
         </div>
         <p className="chart-summary">
-          By verifying and enabling SMS, you consent to transactional Faro follow-up reminders.
-          Message and data rates may apply. Reply STOP to unsubscribe. Quiet hours are enforced in
-          your Faro timezone.
+          By verifying your number, you consent to transactional Faro reminders for every due
+          follow-up assigned to you. Message and data rates may apply. Reply STOP to unsubscribe.
+          Quiet hours are enforced in your Faro timezone.
         </p>
       </section>
       <section

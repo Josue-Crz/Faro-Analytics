@@ -5,6 +5,66 @@ export interface CompanyIndustryGroup<T> {
   industry: string;
 }
 
+export const COMPANY_CATEGORY_REFERENCE_SOURCES = Object.freeze({
+  gics: {
+    href: 'https://www.msci.com/indexes/index-resources/gics',
+    label: 'GICS',
+  },
+  naics: {
+    href: 'https://www.census.gov/naics/',
+    label: 'NAICS',
+  },
+  wikidata: {
+    href: 'https://www.wikidata.org/wiki/Property:P452',
+    label: 'Wikidata industry (P452)',
+  },
+});
+
+export interface CompanyCategorySourceSummary {
+  bestEffort: number;
+  importedTaxonomy: number;
+  nameOrDomain: number;
+  sourceField: number;
+  unrecorded: number;
+  wikidata: number;
+}
+
+export function summarizeCompanyCategorySources(
+  sources: Array<string | null | undefined>,
+): CompanyCategorySourceSummary {
+  const summary: CompanyCategorySourceSummary = {
+    bestEffort: 0,
+    importedTaxonomy: 0,
+    nameOrDomain: 0,
+    sourceField: 0,
+    unrecorded: 0,
+    wikidata: 0,
+  };
+  sources.forEach((source) => {
+    switch (source) {
+      case 'SOURCE_FIELD':
+        summary.sourceField += 1;
+        break;
+      case 'THIRD_PARTY_CONTEXT':
+        summary.importedTaxonomy += 1;
+        break;
+      case 'WIKIDATA':
+        summary.wikidata += 1;
+        break;
+      case 'NAME_OR_DOMAIN':
+        summary.nameOrDomain += 1;
+        break;
+      case 'BEST_EFFORT':
+      case 'FALLBACK':
+        summary.bestEffort += 1;
+        break;
+      default:
+        summary.unrecorded += 1;
+    }
+  });
+  return summary;
+}
+
 export function groupCompaniesByIndustry<T>(
   companies: T[],
   getIndustry: (company: T) => string,

@@ -285,10 +285,18 @@ export async function POST(request: NextRequest) {
         occurredAt: interaction.occurredAt.toISOString(),
         subject: interaction.subject ?? undefined,
       })),
+      followUp: followUp
+        ? {
+            dueAt: followUp.dueAt.toISOString(),
+            id: followUp.id,
+            initialAt: followUp.initialAt.toISOString(),
+            reason: followUp.reason,
+          }
+        : undefined,
       latestResponse: latestInbound?.bodyText.slice(0, 12_000),
       latestResponseSourceRecordId: latestInbound?.id,
       objective: parsed.data.objective,
-      recommendedOutreachAt: null,
+      recommendedOutreachAt: (followUp?.dueAt ?? contact.nextActionAt).toISOString(),
       selectedTone: parsed.data.tone,
       workspaceId,
     });
@@ -327,10 +335,16 @@ export async function POST(request: NextRequest) {
         title: contact.title,
       },
       interactionHistory: [],
+      followUp: {
+        dueAt: followUp.followUpAt,
+        id: followUp.id,
+        initialAt: followUp.initialAt,
+        reason: followUp.reason,
+      },
       latestResponse: followUp.lastResponse,
       latestResponseSourceRecordId: followUp.id,
       objective: parsed.data.objective,
-      recommendedOutreachAt: null,
+      recommendedOutreachAt: followUp.followUpAt,
       selectedTone: parsed.data.tone,
       workspaceId,
     });

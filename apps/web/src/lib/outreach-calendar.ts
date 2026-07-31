@@ -39,6 +39,45 @@ export interface OutreachDaySignal {
   score: number;
 }
 
+export const OUTREACH_TIMING_BENCHMARK = Object.freeze({
+  href: 'https://mailchimp.com/resources/insights-from-mailchimps-send-time-optimization-system/',
+  publisher: 'Mailchimp',
+  title: 'Insights from Mailchimp’s Send Time Optimization System',
+});
+
+export interface OutreachBenchmarkAlignment {
+  dayAligned: boolean;
+  label:
+    | 'Aligned with external benchmark'
+    | 'Day aligned; local time differs'
+    | 'Time aligned; local day differs'
+    | 'Local evidence or constraints override the benchmark';
+  timeAligned: boolean;
+}
+
+/**
+ * Compares a recommendation with Mailchimp's aggregate Tuesday–Thursday, approximately
+ * 10:00-local benchmark. This describes external-prior alignment, not predictive accuracy.
+ */
+export function outreachBenchmarkAlignment(window: {
+  time: string;
+  weekday: string;
+}): OutreachBenchmarkAlignment {
+  const [rawHour, rawMinute] = window.time.split(':');
+  const minutes = Number(rawHour) * 60 + Number(rawMinute);
+  const dayAligned = ['Tuesday', 'Wednesday', 'Thursday'].includes(window.weekday);
+  const timeAligned = Number.isFinite(minutes) && Math.abs(minutes - 10 * 60) <= 60;
+  const label =
+    dayAligned && timeAligned
+      ? 'Aligned with external benchmark'
+      : dayAligned
+        ? 'Day aligned; local time differs'
+        : timeAligned
+          ? 'Time aligned; local day differs'
+          : 'Local evidence or constraints override the benchmark';
+  return { dayAligned, label, timeAligned };
+}
+
 export function dateInTimeZone(instant: string, timeZone: string): string {
   const parts = new Intl.DateTimeFormat('en-US-u-ca-gregory-nu-latn', {
     day: '2-digit',

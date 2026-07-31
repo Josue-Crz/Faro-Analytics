@@ -137,6 +137,10 @@ export default function CampaignDetailPage() {
                 <div>
                   <h3>{task.contact}</h3>
                   <p>{task.reason}</p>
+                  <p>
+                    Initial date: {new Date(task.initialAt).toLocaleString()} · Follow-up date:{' '}
+                    {new Date(task.followUpAt).toLocaleString()}
+                  </p>
                 </div>
                 <div className="list-card__meta">
                   <StatusBadge label={task.statusLabel} status={task.status} />
@@ -209,7 +213,14 @@ export default function CampaignDetailPage() {
                 <td>{contact.industry}</td>
                 <td>{contact.stage}</td>
                 <td>{contact.lastInteraction}</td>
-                <td>{contact.nextAction}</td>
+                <td>
+                  {contact.nextAction}
+                  <br />
+                  <small>
+                    {contact.nextActionType.replaceAll('_', ' ').toLocaleLowerCase()} ·{' '}
+                    {new Date(contact.nextActionAt).toLocaleString()}
+                  </small>
+                </td>
               </tr>
             ))}
             {!visibleCampaignContacts.length ? (

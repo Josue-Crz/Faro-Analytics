@@ -95,6 +95,13 @@ export default function ContactDetailPage() {
               <dd>{contact.consent}</dd>
             </div>
             <div>
+              <dt>Next action</dt>
+              <dd>
+                {contact.nextActionType.replaceAll('_', ' ').toLocaleLowerCase()} ·{' '}
+                {new Date(contact.nextActionAt).toLocaleString()}
+              </dd>
+            </div>
+            <div>
               <dt>External ID</dt>
               <dd className="mono">SHEET-{contact.id.slice(-6).toUpperCase()}</dd>
             </div>
@@ -124,6 +131,10 @@ export default function ContactDetailPage() {
                 />
               </div>
               <p className="recommendation-copy">{task.explanation}</p>
+              <p className="chart-summary">
+                Initial date: {new Date(task.initialAt).toLocaleString()} · Follow-up date:{' '}
+                {new Date(task.followUpAt).toLocaleString()}
+              </p>
               <div className="tag-list" aria-label="Recommendation reason codes">
                 {task.reasonCodes.map((reason) => (
                   <code className="faro-tag" key={reason}>

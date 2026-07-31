@@ -215,6 +215,7 @@ export default function ContactsPage() {
                     <th scope="col">Type</th>
                     <th scope="col">Campaign / stage</th>
                     <th scope="col">Last interaction</th>
+                    <th scope="col">Next scheduled action</th>
                     <th scope="col">Response signal</th>
                     <th scope="col">Consent</th>
                   </tr>
@@ -251,6 +252,12 @@ export default function ContactsPage() {
                         <span className="table-subtext">{contact.stage}</span>
                       </td>
                       <td>{contact.lastInteraction}</td>
+                      <td>
+                        {contact.nextActionType.replaceAll('_', ' ').toLocaleLowerCase()}
+                        <span className="table-subtext">
+                          {new Date(contact.nextActionAt).toLocaleString()}
+                        </span>
+                      </td>
                       <td>
                         <strong className="mono" style={{ fontSize: '.8rem' }}>
                           {contact.responseRate}%

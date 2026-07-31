@@ -3,12 +3,15 @@
 import { ArrowRight, Renew } from '@carbon/icons-react';
 import { Button, InlineNotification } from '@carbon/react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { categorizeOrganization } from '@faro/core';
+import { faroAnnualFundingPlan, type SponsorshipPortfolioItem } from '@/lib/sponsorship-portfolio';
 
+import { CampaignFundingProgress } from './CampaignFundingProgress';
 import { MetricCard } from './MetricCard';
 import { PageHeader } from './PageHeader';
+import { SponsorshipPortfolioSnapshot } from './SponsorshipPortfolioSnapshot';
 import { StatusBadge } from './StatusBadge';
 
 function categoryDisplayLabel(organization?: { industry: string; name: string } | null): string {
@@ -39,6 +42,15 @@ interface ConnectedData {
   dueNext24Hours: number;
   followUps: number;
   importedFollowUps: number;
+  nextActions: Array<{
+    consentStatus: string;
+    firstName: string;
+    id: string;
+    lastName: string;
+    nextActionAt: string;
+    nextActionType: 'INITIAL_OUTREACH' | 'FOLLOW_UP' | 'CONSENT_REVIEW' | 'SCHEDULE_REVIEW';
+    organization: { industry: string; name: string } | null;
+  }>;
   organizations: number;
   overdue: number;
   priorityFollowUps: Array<{
@@ -51,11 +63,13 @@ interface ConnectedData {
     };
     dueAt: string;
     id: string;
+    initialAt: string;
     priority: string;
     reason: string;
     recommendedNextAction: string | null;
     status: string;
   }>;
+  sponsorshipPortfolio: SponsorshipPortfolioItem[];
   scope: {
     campaign: { id: string; name: string } | null;
     kind: 'CAMPAIGN' | 'WORKSPACE';
@@ -69,15 +83,25 @@ export function ConnectedDashboard() {
   const [error, setError] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  useEffect(() => {
-    void fetch('/api/dashboard/connected', { cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('dashboard');
-        return (await response.json()) as { data: ConnectedData };
-      })
-      .then((result) => setData(result.data))
-      .catch(() => setError(true));
+  const load = useCallback(async () => {
+    const response = await fetch('/api/dashboard/connected', { cache: 'no-store' });
+    if (!response.ok) throw new Error('dashboard');
+    const result = (await response.json()) as { data: ConnectedData };
+    setData(result.data);
   }, []);
+  useEffect(() => {
+    const initial = window.setTimeout(() => void load().catch(() => setError(true)), 0);
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void load().catch(() => setError(true));
+    };
+    const interval = window.setInterval(refresh, 30_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [load]);
   if (error) {
     return (
       <InlineNotification hideCloseButton kind="error" title="Connected dashboard unavailable" />
@@ -110,11 +134,7 @@ export function ConnectedDashboard() {
         ? `${failures} Sheet refreshes failed; existing records were preserved.`
         : `Refreshed ${result.data.attempted} connected Sheet${result.data.attempted === 1 ? '' : 's'}.`,
     );
-    const dashboard = await fetch('/api/dashboard/connected', { cache: 'no-store' });
-    if (dashboard.ok) {
-      const updated = (await dashboard.json()) as { data: ConnectedData };
-      setData(updated.data);
-    }
+    await load();
   }
   const priorityFollowUp = data.priorityFollowUps[0];
   const firstName = data.userName.trim().split(/\s+/)[0] || data.userName;
@@ -178,6 +198,15 @@ export function ConnectedDashboard() {
       {actionMessage ? (
         <InlineNotification hideCloseButton kind="info" lowContrast title={actionMessage} />
       ) : null}
+      <CampaignFundingProgress
+        campaignName={data.scope.campaign?.name}
+        items={data.sponsorshipPortfolio}
+        plan={faroAnnualFundingPlan}
+      />
+      <SponsorshipPortfolioSnapshot
+        items={data.sponsorshipPortfolio}
+        title="Faro Analytics sponsor update"
+      />
       {priorityFollowUp ? (
         <section className="action-brief" aria-labelledby="connected-priority-action-title">
           <div className="action-brief__main">
@@ -205,6 +234,14 @@ export function ConnectedDashboard() {
               <div>
                 <dt>Campaign</dt>
                 <dd>{priorityFollowUp.campaign.name}</dd>
+              </div>
+              <div>
+                <dt>Initial date</dt>
+                <dd>{new Date(priorityFollowUp.initialAt).toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt>Follow-up date</dt>
+                <dd>{new Date(priorityFollowUp.dueAt).toLocaleString()}</dd>
               </div>
               <div>
                 <dt>Company · category</dt>
@@ -295,44 +332,44 @@ export function ConnectedDashboard() {
       <section className="panel panel--flush" aria-labelledby="connected-actions-title">
         <div className="panel__header" style={{ padding: '1.25rem' }}>
           <div>
-            <h2 id="connected-actions-title">Open relationship work</h2>
-            <p>Ranked by due time within the current workspace or campaign scope.</p>
+            <h2 id="connected-actions-title">Scheduled relationship actions</h2>
+            <p>Every contact has a future initial outreach, follow-up, or review date.</p>
           </div>
-          <Link className="section-link" href="/follow-ups">
+          <Link className="section-link" href="/contacts">
             View all <ArrowRight size={16} />
           </Link>
         </div>
-        {data.priorityFollowUps.length ? (
-          data.priorityFollowUps.map((followUp) => (
+        {data.nextActions.length ? (
+          data.nextActions.map((action) => (
             <Link
               className="list-card dashboard-action"
-              href="/follow-ups"
-              key={followUp.id}
+              href="/contacts"
+              key={action.id}
               style={{ color: 'inherit', textDecoration: 'none' }}
             >
               <div>
                 <h3>
-                  {followUp.contact.firstName} {followUp.contact.lastName}
+                  {action.firstName} {action.lastName}
                 </h3>
                 <p>
-                  {followUp.campaign.name} · {followUp.contact.organization?.name ?? 'No company'} ·{' '}
-                  {categoryDisplayLabel(followUp.contact.organization)}
+                  {action.organization?.name ?? 'No company'} ·{' '}
+                  {categoryDisplayLabel(action.organization)}
                 </p>
-                <p>{followUp.reason}</p>
+                <p>{action.nextActionType.replaceAll('_', ' ').toLocaleLowerCase()}</p>
               </div>
               <div className="list-card__meta">
                 <StatusBadge
-                  label={followUp.priority}
-                  status={new Date(followUp.dueAt) < new Date() ? 'due' : 'attention'}
+                  label={action.nextActionType.replaceAll('_', ' ')}
+                  status={action.nextActionType === 'CONSENT_REVIEW' ? 'attention' : 'ready'}
                 />
                 <span className="mono" style={{ fontSize: '.6875rem' }}>
-                  {new Date(followUp.dueAt).toLocaleString()}
+                  {new Date(action.nextActionAt).toLocaleString()}
                 </span>
               </div>
             </Link>
           ))
         ) : (
-          <p style={{ padding: '1.25rem' }}>No active follow-ups.</p>
+          <p style={{ padding: '1.25rem' }}>No contacts are in the current scope.</p>
         )}
       </section>
       <div className="dashboard-section-heading">

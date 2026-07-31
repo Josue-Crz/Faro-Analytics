@@ -56,6 +56,8 @@ export interface GovernedContactContext {
   timezone?: string;
   preferredChannel?: string;
   consentStatus: string;
+  nextActionAt: string;
+  nextActionType: string;
   suppressed: boolean;
 }
 

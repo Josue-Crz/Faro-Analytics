@@ -85,6 +85,16 @@ export default function OutreachPage() {
                   {contact.organization} · {contact.industry} · {tasks.length} follow-up
                   {tasks.length === 1 ? '' : 's'} · Demo email context
                 </p>
+                <p>
+                  Next {contact.nextActionType.replaceAll('_', ' ').toLocaleLowerCase()}:{' '}
+                  {new Date(contact.nextActionAt).toLocaleString()}
+                </p>
+                {tasks.map((task) => (
+                  <p key={task.id}>
+                    Initial date: {new Date(task.initialAt).toLocaleString()} · Follow-up date:{' '}
+                    {new Date(task.followUpAt).toLocaleString()}
+                  </p>
+                ))}
               </div>
               <Button disabled kind="ghost" size="sm">
                 IBM Bob demo

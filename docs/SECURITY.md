@@ -24,8 +24,8 @@ owners must complete the credentials-required items before handling real persona
 
 ## Deployment requirements
 
-- Replace the demo identity with secure, HTTP-only, same-site sessions and a verified identity
-  provider. Add CSRF tokens for cookie-authenticated mutations.
+- Replace the connected tester OAuth/session design with the deployment's managed identity
+  provider and lifecycle controls. Add explicit CSRF tokens for cookie-authenticated mutations.
 - Replace development MCP tokens with scoped, expiring credentials and constant-time verification.
 - Encrypt Google refresh tokens with a managed key; validate OAuth state and exact redirect URI.
 - Validate webhook signatures before accepting provider events.

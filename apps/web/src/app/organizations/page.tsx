@@ -6,12 +6,20 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
 import { PageHeader } from '@/components/PageHeader';
+import { SponsorshipPortfolioSnapshot } from '@/components/SponsorshipPortfolioSnapshot';
 import { COMPANY_CATEGORIES } from '@faro/core';
 import { groupCompaniesByIndustry } from '@/lib/company-categories';
 import { organizations } from '@/lib/demo-data';
+import { faroSponsorshipPortfolio } from '@/lib/sponsorship-portfolio';
 
 function organizationStatus(signal: string) {
-  if (signal === 'Clear signal' || signal === 'Draft ready') return 'clear';
+  if (
+    signal === 'Clear signal' ||
+    signal === 'Draft ready' ||
+    signal === 'Cash confirmed' ||
+    signal === 'In-kind confirmed'
+  )
+    return 'clear';
   if (signal === 'Needs attention') return 'due';
   return 'attention';
 }
@@ -61,26 +69,31 @@ export default function OrganizationsPage() {
         title="Organizations"
       />
 
+      <SponsorshipPortfolioSnapshot
+        items={faroSponsorshipPortfolio}
+        title="Faro Analytics sponsor update"
+      />
+
       <div className="metric-grid metric-grid--compact" aria-label="Organization summary">
         <article className="metric-card">
           <p className="metric-card__label">Active organizations</p>
-          <p className="metric-card__value">63</p>
-          <p className="table-subtext">24 sponsors · 19 partners</p>
+          <p className="metric-card__value">66</p>
+          <p className="table-subtext">27 sponsors · 19 partners</p>
         </article>
         <article className="metric-card">
           <p className="metric-card__label">Open estimated value</p>
-          <p className="metric-card__value">$486k</p>
-          <p className="table-subtext">$271k weighted</p>
+          <p className="metric-card__value">$487k</p>
+          <p className="table-subtext">$272k weighted · credits excluded</p>
         </article>
         <article className="metric-card">
           <p className="metric-card__label">Decision makers mapped</p>
-          <p className="metric-card__value">78%</p>
-          <p className="table-subtext">49 of 63 organizations</p>
+          <p className="metric-card__value">74%</p>
+          <p className="table-subtext">49 of 66 organizations</p>
         </article>
         <article className="metric-card">
           <p className="metric-card__label">Needs attention</p>
-          <p className="metric-card__value">7</p>
-          <p className="table-subtext">2 negotiation-stage</p>
+          <p className="metric-card__value">8</p>
+          <p className="table-subtext">Meta planning starts in early November</p>
         </article>
       </div>
 
@@ -88,7 +101,7 @@ export default function OrganizationsPage() {
         <div className="section-heading">
           <div>
             <h2 id="organization-table-heading">Organizations and sponsors</h2>
-            <p>Fictional seeded portfolio</p>
+            <p>Workspace-provided sponsor updates and fictional product-tour records</p>
           </div>
         </div>
         <div className="filters-bar">

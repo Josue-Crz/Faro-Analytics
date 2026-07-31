@@ -58,6 +58,18 @@ export type CampaignDetailsUpdate = Extract<
   { action: 'UPDATE_DETAILS' }
 >;
 
+export function campaignMutationConflictsWithFocus(input: {
+  action: z.infer<typeof campaignManagementRequestSchema>['action'] | 'DELETE';
+  focusedCampaignId: string | null;
+  targetCampaignId: string;
+}): boolean {
+  return Boolean(
+    input.focusedCampaignId &&
+    input.focusedCampaignId !== input.targetCampaignId &&
+    (input.action === 'UPDATE_SOURCE' || input.action === 'COMPLETE'),
+  );
+}
+
 export function campaignDateRange(input: Pick<CampaignDetailsUpdate, 'endDate' | 'startDate'>): {
   endAt: Date | null;
   startAt: Date | null;

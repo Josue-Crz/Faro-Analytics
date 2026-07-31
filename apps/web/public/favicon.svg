@@ -1,6 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" fill="#0f62fe"/>
-  <path d="m13 7 3-3 3 3v4h-6zm-1.5 5.5h9L23 29H9z" fill="none" stroke="#fff" stroke-width="2"/>
-  <circle cx="16" cy="9" r="2" fill="#08bdba"/>
-  <path d="M2 9h9m10 0h9" stroke="#08bdba" stroke-width="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Faro Analytics">
+  <rect width="100" height="100" rx="12" fill="#161616"/>
+  <path d="M2 27h31m34 0h31" stroke="#08bdba" stroke-width="4" stroke-linecap="round"/>
+  <path d="m39 23 11-11 11 11v14H39z" fill="#0f62fe"/>
+  <circle cx="50" cy="27" r="6" fill="#f4f4f4"/>
+  <path d="M36 41h28l10 48H26z" fill="#161616" stroke="#f4f4f4" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M22 90h56M32 67h36M35 52h30" stroke="#f4f4f4" stroke-width="6" stroke-linecap="round"/>
 </svg>

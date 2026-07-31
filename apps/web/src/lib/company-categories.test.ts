@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { groupCompaniesByIndustry } from './company-categories';
+import {
+  COMPANY_CATEGORY_REFERENCE_SOURCES,
+  groupCompaniesByIndustry,
+  summarizeCompanyCategorySources,
+} from './company-categories';
 
 const companies = [
   { contacts: 3, industry: 'Technology', name: 'Northstar Labs' },
@@ -34,5 +38,29 @@ describe('company industry groups', () => {
     const other = groups.find((group) => group.industry === 'Other');
 
     expect(other).toMatchObject({ companyCount: 1, contactCount: 0 });
+  });
+
+  it('summarizes recorded organization category provenance', () => {
+    expect(
+      summarizeCompanyCategorySources([
+        'SOURCE_FIELD',
+        'THIRD_PARTY_CONTEXT',
+        'WIKIDATA',
+        'NAME_OR_DOMAIN',
+        'BEST_EFFORT',
+        'FALLBACK',
+        null,
+      ]),
+    ).toEqual({
+      bestEffort: 2,
+      importedTaxonomy: 1,
+      nameOrDomain: 1,
+      sourceField: 1,
+      unrecorded: 1,
+      wikidata: 1,
+    });
+    expect(COMPANY_CATEGORY_REFERENCE_SOURCES.wikidata.href).toBe(
+      'https://www.wikidata.org/wiki/Property:P452',
+    );
   });
 });

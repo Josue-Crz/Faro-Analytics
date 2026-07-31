@@ -82,6 +82,8 @@ describe('Bob-backed Faro MCP backend', () => {
       getContactContext: async (_workspaceId, contactId) => ({
         id: contactId,
         consentStatus: 'OPTED_IN',
+        nextActionAt: '2026-08-03T16:30:00.000Z',
+        nextActionType: 'FOLLOW_UP',
         suppressed: false,
       }),
     });

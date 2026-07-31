@@ -5,7 +5,7 @@ import {
   IbmBobRuntimeUnavailableError,
   UnavailableIbmBobRuntimeAdapter,
 } from './adapters/unavailable';
-import type { OutreachDraftInput } from './contracts/outreach';
+import { outreachDraftInputSchema, type OutreachDraftInput } from './contracts/outreach';
 import { validateOutreachDraftResult } from './validation/output';
 import { InMemoryBobGenerationRequestStore } from './workflows/request-store';
 
@@ -72,6 +72,21 @@ describe('IBM Bob boundary', () => {
     expect(completed.status).toBe('COMPLETED');
     expect(completed.result).toEqual(output);
     expect(completed.resultProvenance).toBe('IBM_BOB');
+  });
+
+  it('requires a follow-up initial date at or before its due date', () => {
+    expect(() =>
+      outreachDraftInputSchema.parse({
+        ...input,
+        approvedSourceRecordIds: [...input.approvedSourceRecordIds, 'follow-up-one'],
+        followUp: {
+          dueAt: '2026-03-01T12:00:00.000Z',
+          id: 'follow-up-one',
+          initialAt: '2026-03-02T12:00:00.000Z',
+          reason: 'Review the recorded response.',
+        },
+      }),
+    ).toThrow(/initial follow-up instant/i);
   });
 
   it('rejects extra output keys and cross-workspace request access', async () => {

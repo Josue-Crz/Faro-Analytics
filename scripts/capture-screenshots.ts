@@ -5,6 +5,12 @@ async function main() {
   const baseURL = process.env.FARO_SCREENSHOT_URL ?? 'http://127.0.0.1:3000';
   const output = 'docs/screenshots';
   const mode = process.env.FARO_SCREENSHOT_MODE ?? 'fallback';
+  const requestedNames = new Set(
+    (process.env.FARO_SCREENSHOT_NAMES ?? '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean),
+  );
 
   await mkdir(output, { recursive: true });
   const browser = await chromium.launch();
@@ -25,12 +31,19 @@ async function main() {
   }
   const page = await context.newPage();
 
-  for (const [name, route] of [
-    ['dashboard', '/dashboard'],
-    ['follow-ups', '/follow-ups?task=fu_amara'],
-    ['analytics', '/analytics'],
-    ['google-sheets', '/integrations/google-sheets'],
-  ] as const) {
+  const captures = (
+    [
+      ['dashboard', '/dashboard'],
+      ['follow-ups', '/follow-ups?task=fu_amara'],
+      ['analytics', '/analytics'],
+      ['google-sheets', '/integrations/google-sheets'],
+    ] as const
+  ).filter(([name]) => requestedNames.size === 0 || requestedNames.has(name));
+  if (captures.length === 0) {
+    throw new Error('FARO_SCREENSHOT_NAMES did not match a supported screenshot');
+  }
+
+  for (const [name, route] of captures) {
     await page.goto(`${baseURL}${route}`, { waitUntil: 'networkidle' });
     if (name === 'google-sheets') {
       await page.getByRole('button', { name: 'Preview and validate' }).click();
@@ -49,7 +62,7 @@ async function main() {
 
   await browser.close();
   console.log(
-    `Captured ${output}/dashboard.png, follow-ups.png, analytics.png, and google-sheets.png in ${mode} mode`,
+    `Captured ${captures.map(([name]) => `${output}/${name}.png`).join(', ')} in ${mode} mode`,
   );
 }
 

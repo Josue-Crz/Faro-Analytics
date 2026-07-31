@@ -420,6 +420,7 @@ export class PrismaFaroMcpContextRepository implements FaroMcpContextRepository 
       id: row.id,
       contactId: row.contactId,
       campaignId: row.campaignId,
+      initialAt: row.initialAt.toISOString(),
       dueAt: row.dueAt.toISOString(),
       priority: row.priority,
       reason: row.reason,
@@ -450,6 +451,8 @@ export class PrismaFaroMcpContextRepository implements FaroMcpContextRepository 
           timezone: contact.timezone,
           preferredChannel: contact.preferredChannel,
           consentStatus: contact.consentStatus,
+          nextActionAt: contact.nextActionAt.toISOString(),
+          nextActionType: contact.nextActionType,
           suppressed: contact.suppressedAt !== null,
         }
       : null;

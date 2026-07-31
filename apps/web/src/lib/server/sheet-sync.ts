@@ -14,7 +14,9 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
+import { googleSheetDateTimeToInstant } from '../zoned-date-time';
 import type { FaroSession } from './auth';
+import { recalculateContactNextActionInTransaction } from './contact-next-action';
 import {
   companyCategoryEnrichmentSchema,
   isFreshCompanyCategoryEnrichment,
@@ -27,6 +29,9 @@ import { pruneAutomaticSheetPollRuns } from './sheet-poll-retention';
 
 const googleValuesSchema = z.object({
   values: z.array(z.array(z.union([z.string(), z.number(), z.boolean()]))).default([]),
+});
+const googleSpreadsheetPropertiesSchema = z.object({
+  properties: z.object({ timeZone: z.string().min(1) }),
 });
 
 export const sheetSyncRequestSchema = z
@@ -311,14 +316,21 @@ function enrichmentJson(enrichment: CompanyCategoryEnrichment) {
       };
 }
 
-function followUpInstant(value: string): string | null {
-  if (!value.trim()) return null;
-  const serial = Number(value);
-  const date =
-    Number.isFinite(serial) && serial > 0 && serial < 1_000_000
-      ? new Date(Date.UTC(1899, 11, 30) + serial * 86_400_000)
-      : new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+function followUpInstant(value: string, timeZone = 'UTC'): string | null {
+  return googleSheetDateTimeToInstant(value, timeZone);
+}
+
+function followUpInitialInstant(
+  value: string,
+  dueAt: string | null,
+  importedAt: Date,
+  timeZone = 'UTC',
+): string | null {
+  if (!dueAt) return null;
+  const explicit = followUpInstant(value, timeZone);
+  const dueTime = new Date(dueAt).getTime();
+  if (explicit && new Date(explicit).getTime() <= dueTime) return explicit;
+  return new Date(Math.min(importedAt.getTime(), dueTime)).toISOString();
 }
 
 function canonicalChannel(value?: string) {
@@ -362,17 +374,31 @@ async function readGoogleRows(userId: string, input: SheetSyncRequest) {
   );
   url.searchParams.set('majorDimension', 'ROWS');
   url.searchParams.set('valueRenderOption', 'UNFORMATTED_VALUE');
-  const response = await fetch(url, {
-    cache: 'no-store',
-    headers: { authorization: `Bearer ${token}` },
-  });
-  if (!response.ok)
+  const [response, metadataResponse] = await Promise.all([
+    fetch(url, {
+      cache: 'no-store',
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+        input.spreadsheetId,
+      )}?fields=properties(timeZone)`,
+      {
+        cache: 'no-store',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    ),
+  ]);
+  if (!response.ok || !metadataResponse.ok)
     throw new Error(response.status === 404 ? 'SHEET_NOT_FOUND' : 'GOOGLE_SHEETS_READ_FAILED');
   const { values } = googleValuesSchema.parse(await response.json());
+  const spreadsheetTimeZone = googleSpreadsheetPropertiesSchema.parse(await metadataResponse.json())
+    .properties.timeZone;
   const headers = (values[0] ?? []).map(String).slice(0, 200);
   if (headers.length === 0) throw new Error('SHEET_HEADERS_MISSING');
   return {
     headers,
+    timeZone: spreadsheetTimeZone,
     rows: values
       .slice(1, 5001)
       .map((valuesRow) =>
@@ -744,10 +770,26 @@ export async function syncGoogleSheet(
               ],
               workspaceId: session.workspaceId,
             },
-            select: { customFields: true, id: true },
+            select: { customFields: true, id: true, nextActionAt: true },
           });
           const importedFollowUpAt = followUpInstant(
             pick(row, ['Follow-Up Date', 'Follow Up Date', 'Next Follow Up', 'Due Date']),
+            sheet.timeZone,
+          );
+          const importedFollowUpInitialAt = followUpInitialInstant(
+            pick(row, [
+              'Initial Date',
+              'Initial Outreach Date',
+              'Initial Contact Date',
+              'Initial Contact At',
+              'Initial Date',
+              'Follow-Up Initial Date',
+              'Follow Up Initial Date',
+              'Follow-Up Start Date',
+            ]),
+            importedFollowUpAt,
+            startedAt,
+            sheet.timeZone,
           );
           const existingFields = jsonObject(existingContact?.customFields);
           const manualOverrides = storedContactManualOverrides(existingFields);
@@ -761,6 +803,7 @@ export async function syncGoogleSheet(
               ...mergeContactCustomFields(existingFields, mappedContact.contact.customFields),
               assignedOwnerEmail: session.email,
               importedFollowUpAt,
+              importedFollowUpInitialAt,
               importedFollowUpPending,
               sourceRow: index + 2,
             },
@@ -792,8 +835,31 @@ export async function syncGoogleSheet(
           } else {
             contactId = randomUUID();
             await database.contact.create({
-              data: { ...contactData, consentStatus: 'UNKNOWN', id: contactId },
+              data: {
+                ...contactData,
+                consentStatus: 'UNKNOWN',
+                id: contactId,
+                nextActionAt: new Date(startedAt.getTime() + 24 * 60 * 60_000),
+                nextActionType: 'CONSENT_REVIEW',
+              },
             });
+          }
+          if (
+            existingContact &&
+            (existingContact.nextActionAt.getTime() <= startedAt.getTime() ||
+              Boolean(importedFollowUpAt))
+          ) {
+            await recalculateContactNextActionInTransaction(
+              database,
+              session.workspaceId,
+              contactId,
+              startedAt,
+              {
+                actorId: session.userId,
+                actorType: 'USER',
+                importedFollowUpAt: importedFollowUpAt ? new Date(importedFollowUpAt) : null,
+              },
+            );
           }
           seenContactIds.add(contactId);
           if (existingOrganization || existingContact) rowsUpdated += 1;

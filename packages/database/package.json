@@ -16,7 +16,7 @@
     "validate": "prisma validate",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
-    "seed": "tsx prisma/seed.ts"
+    "seed": "node --env-file-if-exists=../../.env --import tsx prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.1"

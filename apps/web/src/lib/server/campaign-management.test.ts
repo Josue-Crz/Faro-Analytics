@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { campaignDateRange, campaignManagementRequestSchema } from './campaign-management';
+import {
+  campaignDateRange,
+  campaignManagementRequestSchema,
+  campaignMutationConflictsWithFocus,
+} from './campaign-management';
 
 const campaignDetails = {
   action: 'UPDATE_DETAILS' as const,
@@ -33,5 +37,16 @@ describe('campaign management validation', () => {
       endAt: new Date('2026-10-31T23:59:59.999Z'),
       startAt: new Date('2026-09-01T00:00:00.000Z'),
     });
+  });
+
+  it('keeps operational focus boundaries without blocking campaign administration', () => {
+    const focus = {
+      focusedCampaignId: 'campaign-focused',
+      targetCampaignId: 'campaign-other',
+    };
+    expect(campaignMutationConflictsWithFocus({ ...focus, action: 'UPDATE_SOURCE' })).toBe(true);
+    expect(campaignMutationConflictsWithFocus({ ...focus, action: 'COMPLETE' })).toBe(true);
+    expect(campaignMutationConflictsWithFocus({ ...focus, action: 'UPDATE_DETAILS' })).toBe(false);
+    expect(campaignMutationConflictsWithFocus({ ...focus, action: 'DELETE' })).toBe(false);
   });
 });

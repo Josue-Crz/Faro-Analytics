@@ -5,6 +5,8 @@ export type ContactType =
   'PARTICIPANT' | 'SPONSOR' | 'PARTNER' | 'DONOR' | 'SPEAKER' | 'VENDOR' | 'OTHER';
 export type ContactChannel = 'EMAIL' | 'PHONE' | 'SMS' | 'MEETING' | 'SOCIAL' | 'OTHER';
 export type ConsentStatus = 'OPTED_IN' | 'IMPLIED' | 'UNKNOWN' | 'OPTED_OUT';
+export type ContactNextActionType =
+  'INITIAL_OUTREACH' | 'FOLLOW_UP' | 'CONSENT_REVIEW' | 'SCHEDULE_REVIEW';
 export type Priority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type SignalStatus = 'CLEAR_SIGNAL' | 'NEEDS_ATTENTION' | 'DATA_INSUFFICIENT' | 'ON_TRACK';
 export type CampaignStatus = 'DRAFT' | 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'ARCHIVED';
@@ -87,7 +89,8 @@ export interface Contact {
   campaignIds: string[];
   status: 'ENGAGED' | 'AWAITING_RESPONSE' | 'FOLLOW_UP_DUE' | 'SUPPRESSED' | 'NEW';
   lastInteractionAt: IsoDateTime | null;
-  nextActionAt: IsoDateTime | null;
+  nextActionAt: IsoDateTime;
+  nextActionType: ContactNextActionType;
 }
 
 export interface Campaign {
@@ -187,6 +190,7 @@ export interface FollowUpTask {
   assignedUserName: string;
   status: FollowUpStatus;
   priority: Priority;
+  initialAt: IsoDateTime;
   dueAt: IsoDateTime;
   reason: string;
   lastResponseSummary: string;

@@ -5,7 +5,6 @@ import type { NextRequest } from 'next/server';
 
 import { sessionFromRequest } from '@/lib/server/auth';
 import { notificationPreferencesSchema } from '@/lib/server/notification-preferences';
-import { smsProviderState } from '@/lib/server/twilio';
 
 export async function PATCH(request: NextRequest) {
   const session = await sessionFromRequest(request);
@@ -30,26 +29,14 @@ export async function PATCH(request: NextRequest) {
     },
   });
   if (!user) return NextResponse.json({ error: 'USER_NOT_FOUND' }, { status: 404 });
-  if (
-    parsed.data.sms &&
-    (!smsProviderState().configured ||
-      !user.smsPhone ||
-      !user.smsVerifiedAt ||
-      !user.smsConsentAt ||
-      user.smsOptedOutAt)
-  ) {
-    return NextResponse.json(
-      {
-        error: 'SMS_NOT_READY',
-        message: 'Verify a mobile number and configure Twilio before enabling SMS reminders.',
-      },
-      { status: 409 },
-    );
-  }
+  const preferences = {
+    ...parsed.data,
+    sms: Boolean(user.smsPhone && user.smsVerifiedAt && user.smsConsentAt && !user.smsOptedOutAt),
+  };
 
   await prisma.$transaction([
     prisma.user.update({
-      data: { notificationPreferences: parsed.data },
+      data: { notificationPreferences: preferences },
       where: {
         id: session.userId,
         memberships: { some: { workspaceId: session.workspaceId } },
@@ -64,16 +51,16 @@ export async function PATCH(request: NextRequest) {
         entityType: 'User',
         id: randomUUID(),
         metadata: {
-          dailyDigest: parsed.data.dailyDigest,
-          email: parsed.data.email,
-          followUpLeadMinutes: parsed.data.followUpLeadMinutes,
-          highPriorityOnly: parsed.data.highPriorityOnly,
-          inApp: parsed.data.inApp,
-          sms: parsed.data.sms,
+          dailyDigest: preferences.dailyDigest,
+          email: preferences.email,
+          followUpLeadMinutes: preferences.followUpLeadMinutes,
+          highPriorityOnly: preferences.highPriorityOnly,
+          inApp: preferences.inApp,
+          sms: preferences.sms,
         },
         workspaceId: session.workspaceId,
       },
     }),
   ]);
-  return NextResponse.json({ data: parsed.data });
+  return NextResponse.json({ data: preferences });
 }

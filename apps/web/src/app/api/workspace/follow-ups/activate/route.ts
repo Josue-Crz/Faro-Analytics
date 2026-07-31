@@ -6,6 +6,7 @@ import { z } from 'zod';
 
 import { sessionFromRequest } from '@/lib/server/auth';
 import { campaignContactSourceWhere } from '@/lib/server/campaign-data-source';
+import { recalculateContactNextActionInTransaction } from '@/lib/server/contact-next-action';
 
 const requestSchema = z.object({ campaignId: z.string().trim().min(1).max(160) });
 
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'CAMPAIGN_COMPLETED' }, { status: 409 });
   }
   const contacts = await prisma.contact.findMany({
-    select: { customFields: true, id: true },
+    select: { customFields: true, id: true, nextActionAt: true },
     where: {
       ...campaignContactSourceWhere(campaign.sheetConnectionId),
       deletedAt: null,
@@ -34,13 +35,30 @@ export async function POST(request: NextRequest) {
     },
   });
   let activated = 0;
+  const now = new Date();
   await prisma.$transaction(async (database) => {
     for (const contact of contacts) {
       const fields = contact.customFields as Record<string, unknown>;
       if (fields.importedFollowUpPending !== true || typeof fields.importedFollowUpAt !== 'string')
         continue;
-      const dueAt = new Date(fields.importedFollowUpAt);
-      if (Number.isNaN(dueAt.getTime())) continue;
+      const importedDueAt = new Date(fields.importedFollowUpAt);
+      if (Number.isNaN(importedDueAt.getTime())) continue;
+      const dueAt =
+        importedDueAt.getTime() > now.getTime()
+          ? importedDueAt
+          : contact.nextActionAt.getTime() > now.getTime()
+            ? contact.nextActionAt
+            : new Date(now.getTime() + 60_000);
+      const importedInitialAt =
+        typeof fields.importedFollowUpInitialAt === 'string'
+          ? new Date(fields.importedFollowUpInitialAt)
+          : null;
+      const initialAt =
+        importedInitialAt &&
+        !Number.isNaN(importedInitialAt.getTime()) &&
+        importedInitialAt.getTime() <= dueAt.getTime()
+          ? importedInitialAt
+          : new Date(Math.min(now.getTime(), dueAt.getTime()));
       await database.campaignContact.upsert({
         create: {
           assignedUserId: session.userId,
@@ -67,6 +85,7 @@ export async function POST(request: NextRequest) {
           campaignId: campaign.id,
           contactId: contact.id,
           dueAt,
+          initialAt,
           id: randomUUID(),
           idempotencyKey,
           priority: 'MEDIUM',
@@ -74,19 +93,30 @@ export async function POST(request: NextRequest) {
           status: 'OPEN',
           workspaceId: session.workspaceId,
         },
-        update: { dueAt, status: 'OPEN' },
+        update: { dueAt, initialAt, status: 'OPEN' },
         where: { workspaceId_idempotencyKey: { idempotencyKey, workspaceId: session.workspaceId } },
       });
       await database.contact.update({
         data: {
           customFields: {
             ...fields,
-            importedFollowUpActivatedAtValue: dueAt.toISOString(),
+            importedFollowUpActivatedAtValue: importedDueAt.toISOString(),
             importedFollowUpPending: false,
           },
         },
         where: { id: contact.id, workspaceId: session.workspaceId },
       });
+      await recalculateContactNextActionInTransaction(
+        database,
+        session.workspaceId,
+        contact.id,
+        now,
+        {
+          actorId: session.userId,
+          actorType: 'USER',
+          importedFollowUpAt: dueAt,
+        },
+      );
       activated += 1;
     }
   });

@@ -7,6 +7,8 @@ import {
   currentPlanningReferenceTime,
   generalCompanyOutreachPlan,
   isFuturePlanningInstant,
+  OUTREACH_TIMING_BENCHMARK,
+  outreachBenchmarkAlignment,
   quarterMarker,
 } from './outreach-calendar';
 
@@ -47,6 +49,23 @@ describe('general-company outreach calendar', () => {
     expect(isFuturePlanningInstant('2026-07-29T18:29:59.999Z', now)).toBe(false);
     expect(isFuturePlanningInstant(now, now)).toBe(false);
     expect(isFuturePlanningInstant('2026-07-29T18:30:00.001Z', now)).toBe(true);
+  });
+
+  it('reports whether a recommendation aligns with the independent timing benchmark', () => {
+    expect(OUTREACH_TIMING_BENCHMARK).toMatchObject({
+      href: expect.stringMatching(/^https:\/\/mailchimp\.com\//),
+      publisher: 'Mailchimp',
+    });
+    expect(outreachBenchmarkAlignment({ time: '10:00', weekday: 'Tuesday' })).toEqual({
+      dayAligned: true,
+      label: 'Aligned with external benchmark',
+      timeAligned: true,
+    });
+    expect(outreachBenchmarkAlignment({ time: '14:00', weekday: 'Friday' })).toEqual({
+      dayAligned: false,
+      label: 'Local evidence or constraints override the benchmark',
+      timeAligned: false,
+    });
   });
 
   it('pairs tracked company sends with their next reply and excludes non-company contacts', () => {

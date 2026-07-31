@@ -41,6 +41,13 @@ enum ConsentStatus {
   OPTED_OUT
 }
 
+enum ContactNextActionType {
+  INITIAL_OUTREACH
+  FOLLOW_UP
+  CONSENT_REVIEW
+  SCHEDULE_REVIEW
+}
+
 enum OrganizationType {
   SPONSOR
   PARTNER
@@ -376,6 +383,8 @@ model Contact {
   customFields     Json           @default("{}")
   consentStatus    ConsentStatus  @default(UNKNOWN)
   suppressedAt     DateTime?
+  nextActionAt     DateTime
+  nextActionType   ContactNextActionType
   externalId       String?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
@@ -396,6 +405,7 @@ model Contact {
   @@index([workspaceId, organizationId])
   @@index([workspaceId, type])
   @@index([workspaceId, consentStatus, suppressedAt])
+  @@index([workspaceId, nextActionAt, nextActionType])
 }
 
 model Campaign {
@@ -554,6 +564,7 @@ model FollowUpTask {
   recommendationId      String?
   status                FollowUpStatus @default(OPEN)
   priority              Priority
+  initialAt             DateTime
   dueAt                 DateTime
   reason                String
   lastResponseSummary   String?

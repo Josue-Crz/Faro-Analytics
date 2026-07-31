@@ -7,7 +7,7 @@ interface LighthouseMarkProps {
 export function LighthouseMark({
   className,
   size = 28,
-  title = 'Faro lighthouse',
+  title = 'Faro Analytics lighthouse',
 }: LighthouseMarkProps) {
   return (
     <svg
@@ -15,16 +15,33 @@ export function LighthouseMark({
       className={className}
       height={size}
       role="img"
-      viewBox="0 0 32 32"
+      viewBox="0 0 100 100"
       width={size}
       xmlns="http://www.w3.org/2000/svg"
     >
-      <path d="M2 8.5h9v2H2z" fill="currentColor" opacity=".38" />
-      <path d="M21 8.5h9v2h-9z" fill="currentColor" opacity=".38" />
-      <path d="m13 7 3-3 3 3v4h-6z" fill="currentColor" />
-      <path d="M11.5 12.5h9L23 29H9z" fill="none" stroke="currentColor" strokeWidth="2" />
-      <path d="M8 29h16M12 20h8M13 15h6" fill="none" stroke="currentColor" strokeWidth="2" />
-      <circle cx="16" cy="9" fill="var(--faro-signal, #08bdba)" r="1.5" />
+      <path
+        d="M2 27h31m34 0h31"
+        fill="none"
+        stroke="var(--faro-signal, #08bdba)"
+        strokeLinecap="round"
+        strokeWidth="4"
+      />
+      <path d="m39 23 11-11 11 11v14H39z" fill="#0f62fe" />
+      <circle cx="50" cy="27" fill="currentColor" r="6" />
+      <path
+        d="M36 41h28l10 48H26z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="6"
+      />
+      <path
+        d="M22 90h56M32 67h36M35 52h30"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="6"
+      />
     </svg>
   );
 }

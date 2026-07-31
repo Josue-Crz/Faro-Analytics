@@ -8,10 +8,11 @@ boundaries testable without Next.js.
 
 ## ADR-002: PostgreSQL is canonical; demo data is explicit
 
-Prisma/PostgreSQL owns operational records. A read-only fictional `demoWorkspace` lets reviewers
-run the UI without credentials. It is labeled throughout and is not presented as persisted or live
-integration data. `FARO_DATA_SOURCE=database` enables the shared web/MCP Bob request repository;
-database-backed repositories for the remaining UI routes are future work.
+Prisma/PostgreSQL owns connected-workspace operational records across dashboard, contacts,
+organizations, campaigns, follow-ups, settings, notifications, Sheets, Gmail history, and Bob
+request routes. A read-only fictional `demoWorkspace` remains available only as an explicitly
+labeled OAuth-failure product tour; it is never presented as persisted or live integration data.
+`FARO_DATA_SOURCE` selects the repository mode but never bypasses session authorization.
 
 ## ADR-003: deterministic timing before explanation
 
@@ -37,4 +38,24 @@ language. Credentials-required features remain disabled in the UI.
 
 IBM Bob may propose draft language, but it cannot approve or send external outreach. Generation,
 editing, approval, and delivery are distinct states so consent and provenance remain visible. The
-hackathon demo ends at approval unless a separately configured, audited delivery workflow is added.
+current product flow ends at approval unless a separately configured, audited external-delivery
+workflow is added. Internal follow-up reminders are a separate notification domain.
+
+## ADR-007: follow-up dates and required internal SMS
+
+Every follow-up stores a required `initialAt` and `dueAt`, with a database constraint that prevents
+the initial instant from falling after the due instant. Once an assignee verifies and consents to a
+mobile number, every due follow-up enters the SMS reminder path regardless of priority. The
+workspace still enforces lead time and quiet hours, and a deduplication key covers the follow-up,
+SMS channel, and due instant. Missing recipient setup creates a visible cancelled audit row instead
+of claiming that an SMS was sent.
+
+## ADR-008: required future contact actions
+
+Every contact persists a non-null `nextActionAt` and `nextActionType`. The deterministic scheduler
+uses consent, suppression, interaction history, timezone, quiet hours, campaign state, and active
+deadlines. Prior outbound activity yields a follow-up; otherwise an eligible contact receives an
+initial outreach. Ineligible contacts receive a dated consent review, not an outreach instruction.
+Past action times and expired campaign deadlines are recalculated from an explicit current clock.
+Connected reads and the notification scheduler self-heal stale values, and lifecycle mutations
+recalculate affected contacts with a workspace-scoped audit event.

@@ -161,6 +161,7 @@ const dueFollowupOutputSchema = z
         id,
         contactId: id,
         campaignId: id,
+        initialAt: instant,
         dueAt: instant,
         priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']),
         reason: z.string().trim().min(1).max(2_000),
@@ -206,6 +207,8 @@ const contactOutputSchema = z
     timezone: z.string().trim().max(100).optional(),
     preferredChannel: z.string().trim().max(100).optional(),
     consentStatus: z.string().trim().min(1).max(100),
+    nextActionAt: instant,
+    nextActionType: z.enum(['INITIAL_OUTREACH', 'FOLLOW_UP', 'CONSENT_REVIEW', 'SCHEDULE_REVIEW']),
     suppressed: z.boolean(),
   })
   .strict();

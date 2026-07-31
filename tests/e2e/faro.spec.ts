@@ -48,6 +48,7 @@ test('workspace API rejects unauthenticated access', async ({ request }) => {
     campaignDelete,
     sheetConnections,
     contactUpdate,
+    contactSchedule,
   ] = await Promise.all([
     request.get('/api/workspace/records'),
     request.get('/api/workspace/context?campaignId=campaign-untrusted'),
@@ -72,6 +73,9 @@ test('workspace API rejects unauthenticated access', async ({ request }) => {
         type: 'OTHER',
       },
     }),
+    request.put('/api/contacts/contact-untrusted/schedule', {
+      data: { campaignId: 'campaign-untrusted', mode: 'OPTIMIZE' },
+    }),
   ]);
   for (const response of [
     records,
@@ -82,6 +86,7 @@ test('workspace API rejects unauthenticated access', async ({ request }) => {
     campaignDelete,
     sheetConnections,
     contactUpdate,
+    contactSchedule,
   ]) {
     expect(response.status()).toBe(401);
     await expect(response.json()).resolves.toMatchObject({ error: 'AUTHENTICATION_REQUIRED' });
@@ -97,22 +102,28 @@ test('Bob generation API rejects unauthenticated access', async ({ request }) =>
 });
 
 test('notification APIs reject unauthenticated access', async ({ request }) => {
-  const [center, preferences, verification] = await Promise.all([
+  const [center, preferences, verification, optOut] = await Promise.all([
     request.get('/api/notifications'),
     request.patch('/api/settings/notifications', { data: {} }),
     request.post('/api/settings/notifications/sms/start', {
       data: { phone: '+14155550123' },
     }),
+    request.post('/api/settings/notifications/sms/opt-out'),
   ]);
 
   expect(center.status()).toBe(401);
   expect(preferences.status()).toBe(401);
   expect(verification.status()).toBe(401);
+  expect(optOut.status()).toBe(401);
 });
 
 test('notification scheduler rejects an untrusted caller', async ({ request }) => {
-  const response = await request.post('/api/cron/notifications');
-  expect([401, 503]).toContain(response.status());
+  const [notifications, schedules] = await Promise.all([
+    request.post('/api/cron/notifications'),
+    request.post('/api/cron/outreach-schedules'),
+  ]);
+  expect([401, 503]).toContain(notifications.status());
+  expect([401, 503]).toContain(schedules.status());
 });
 
 test('empty follow-up setup has no critical accessibility violations', async ({ page }) => {

@@ -99,7 +99,7 @@ Read tools expose only workspace-scoped fields needed for the selected task:
 
 | Tool                             | Access         | Purpose                                                        |
 | -------------------------------- | -------------- | -------------------------------------------------------------- |
-| `faro_get_due_followups`         | Read           | List a bounded due-work queue.                                 |
+| `faro_get_due_followups`         | Read           | List a bounded due-work queue with initial and due instants.   |
 | `faro_get_generation_request`    | Read           | Load one request and its approved source references.           |
 | `faro_get_contact_context`       | Read           | Return minimized contact identity, consent, and preferences.   |
 | `faro_get_organization_context`  | Read           | Return linked organization/campaign facts.                     |

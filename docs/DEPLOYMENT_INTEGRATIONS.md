@@ -32,6 +32,7 @@ openssl rand -base64 48 # AUTH_SECRET
 openssl rand -hex 32    # TOKEN_ENCRYPTION_KEY
 openssl rand -hex 32    # FARO_MCP_TOKEN
 openssl rand -hex 32    # FARO_SYNC_CRON_SECRET
+openssl rand -hex 32    # FARO_NOTIFICATION_CRON_SECRET
 ```
 
 Do not commit the output. `TOKEN_ENCRYPTION_KEY` must decode to exactly 32 bytes. Rotating it
@@ -40,7 +41,8 @@ requires re-encrypting or revoking existing Google credentials.
 ## Configure Google Cloud
 
 1. Create a project in <https://console.cloud.google.com/projectcreate>.
-2. Enable the Sheets API in <https://console.cloud.google.com/apis/library/sheets.googleapis.com>.
+2. Enable the Sheets API in <https://console.cloud.google.com/apis/library/sheets.googleapis.com>
+   and the Gmail API in <https://console.cloud.google.com/apis/library/gmail.googleapis.com>.
 3. Configure branding, audience, and tester accounts under
    <https://console.cloud.google.com/auth/overview>.
 4. Create a **Web application** OAuth client under
@@ -51,9 +53,10 @@ requires re-encrypting or revoking existing Google credentials.
 6. Copy the client ID and client secret into the deployment secret manager.
 
 Faro requests `openid`, `email`, `profile`, and
-`https://www.googleapis.com/auth/spreadsheets`. The spreadsheet scope is sensitive; keep the OAuth
-app in testing with explicitly listed testers until verification is appropriate. Gmail remains
-read-only.
+`https://www.googleapis.com/auth/spreadsheets`, plus
+`https://www.googleapis.com/auth/gmail.readonly`. The spreadsheet and Gmail scopes are sensitive;
+keep the OAuth app in testing with explicitly listed testers until verification is appropriate.
+Faro can write explicit mapped contact edits to Sheets, but Gmail remains read-only.
 
 ```dotenv
 GOOGLE_CLIENT_ID="...apps.googleusercontent.com"
@@ -67,27 +70,38 @@ After login, paste a spreadsheet URL/ID, exact worksheet tab, and a bounded A1 r
 at most 5,000 rows into the tester's isolated workspace. Saving an imported contact writes only its
 mapped edits to its stored source row; polling does not write.
 
-For `SF Hacks 2027 Internal Sponsor Outreach Database - Feburary Event`, use:
-
-```text
-Spreadsheet ID: 1rcowrjzuWPOnUAudCxXg0oNqOLffdjc7JAkvLp3UmWI
-Worksheet tab: 2027 Sponsor Outreach
-Range: A1:AF1000
-```
-
-To refresh configured connections from a deployment scheduler, set `FARO_SYNC_CRON_SECRET` and
-send an authenticated `POST /api/cron/google-sheets` with
-`Authorization: Bearer <FARO_SYNC_CRON_SECRET>`. A failed refresh preserves the last successful
-database snapshot.
+To refresh configured connections and fill missing optimizer schedules from a deployment
+scheduler, set `FARO_SYNC_CRON_SECRET` and send authenticated requests to
+`POST /api/cron/google-sheets` and `POST /api/cron/outreach-schedules` with
+`Authorization: Bearer <FARO_SYNC_CRON_SECRET>`. A failed Sheet refresh preserves the last
+successful database snapshot.
 
 Reconnecting Google automatically attempts to refresh saved Sheet connections. The dashboard also
 provides a manual refresh action. Import creates contacts and organizations only. Campaigns remain
 user-created, and imported follow-up dates remain pending until the user assigns them to a campaign.
+Each imported contact nevertheless receives a required future consent-review date immediately.
+After consent review, Faro assigns a future initial-outreach or follow-up date and automatically
+recalculates expired optimizer deadlines.
 
 For near-real-time polling, set `FARO_WEB_URL`, `FARO_SYNC_CRON_SECRET`, and
 `FARO_SHEET_POLL_INTERVAL_MS`, then run `pnpm worker` alongside the web process. Use 30 seconds for
-tester deployments; the worker enforces a 15-second minimum, avoids overlapping requests, and every
-poll creates a timestamped actor/trigger audit entry.
+tester deployments; the worker enforces a 15-second minimum, avoids overlapping requests, refreshes
+both Sheets and missing draft/active-campaign schedules, and creates timestamped audit entries.
+
+Run the notification worker even when Twilio is still in preview mode. Its scheduler refreshes
+expired contact actions as well as follow-up reminders. Connected dashboard and contact reads also
+repair stale action times, but the recurring worker is the deployment-wide reset path.
+
+## Configure Gmail history
+
+The Google authorization request already asks for `gmail.readonly`. After the Gmail API and scope
+are enabled for the same OAuth project, reconnect the tester account so Google issues a credential
+with the complete scope set. Then open **Outreach** and select **Refresh Gmail history**.
+
+Faro reads at most 100 messages from the last two years and persists only messages whose sender or
+recipient matches an active contact in the authenticated workspace. It does not send, delete,
+label, archive, or create Gmail messages. Imported message bodies are untrusted context and remain
+bounded before any IBM Bob request.
 
 ## Configure PostgreSQL
 
@@ -107,6 +121,15 @@ and then start `pnpm dev`; run all commands from the repository root.
 
 Use `FARO_DATA_SOURCE=database` and never enable
 `FARO_ENABLE_UNAUTHENTICATED_DEMO_DB_ACCESS` in a deployment.
+
+## Configure required follow-up SMS
+
+Set `NOTIFICATION_ADAPTER=twilio`, configure Twilio Messaging and Verify credentials, set
+`FARO_NOTIFICATION_CRON_SECRET`, and run `pnpm worker` alongside the web process. Each assignee must
+verify and consent to their own mobile number under **Settings → Notifications**. After that, every
+due follow-up assigned to them enters the deduplicated SMS path; priority filtering applies only to
+optional channels. Follow the complete setup and smoke-test sequence in
+[Notifications and SMS follow-up alerts](NOTIFICATIONS.md#start-required-follow-up-sms).
 
 ## Configure IBM Bob
 
@@ -145,6 +168,7 @@ pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm test
+pnpm docs:check
 pnpm check:ai-boundary
 pnpm build
 ```

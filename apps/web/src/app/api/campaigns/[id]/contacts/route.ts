@@ -6,6 +6,8 @@ import { z } from 'zod';
 
 import { sessionFromRequest } from '@/lib/server/auth';
 import { campaignContactSourceWhere } from '@/lib/server/campaign-data-source';
+import { recalculateContactNextActionInTransaction } from '@/lib/server/contact-next-action';
+import { saveContactOutreachSchedule } from '@/lib/server/contact-outreach-schedule';
 
 const requestSchema = z.object({ contactIds: z.array(z.string().min(1).max(160)).min(1).max(500) });
 
@@ -28,7 +30,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     return NextResponse.json({ error: 'CAMPAIGN_COMPLETED' }, { status: 409 });
   }
   const contacts = await prisma.contact.findMany({
-    select: { id: true },
+    select: { consentStatus: true, id: true, nextActionAt: true, suppressedAt: true },
     where: {
       deletedAt: null,
       id: { in: parsed.data.contactIds },
@@ -45,11 +47,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
           assignedUserId: session.userId,
           campaignId: campaign.id,
           contactId: contact.id,
+          nextActionAt: contact.nextActionAt,
           priority: 'MEDIUM',
           stage: 'Added',
           workspaceId: session.workspaceId,
         },
-        update: { assignedUserId: session.userId },
+        update: { assignedUserId: session.userId, nextActionAt: contact.nextActionAt },
         where: {
           workspaceId_campaignId_contactId: {
             campaignId: campaign.id,
@@ -58,6 +61,13 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
           },
         },
       });
+      await recalculateContactNextActionInTransaction(
+        database,
+        session.workspaceId,
+        contact.id,
+        new Date(),
+        { actorId: session.userId, actorType: 'USER' },
+      );
     }
     await database.auditEvent.create({
       data: {
@@ -72,5 +82,38 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       },
     });
   });
-  return NextResponse.json({ data: { assigned: contacts.length, campaignId: campaign.id } });
+  let scheduled = 0;
+  const scheduleIssues: Array<{ contactId: string; error: string }> = [];
+  for (const contact of contacts) {
+    if (
+      contact.suppressedAt ||
+      (contact.consentStatus !== 'OPTED_IN' && contact.consentStatus !== 'IMPLIED')
+    ) {
+      scheduleIssues.push({ contactId: contact.id, error: 'OUTREACH_NOT_ALLOWED' });
+      continue;
+    }
+    try {
+      await saveContactOutreachSchedule({
+        actorId: session.userId,
+        contactId: contact.id,
+        focusedCampaignId: session.focusedCampaignId,
+        request: { campaignId: campaign.id, mode: 'OPTIMIZE' },
+        workspaceId: session.workspaceId,
+      });
+      scheduled += 1;
+    } catch (error) {
+      scheduleIssues.push({
+        contactId: contact.id,
+        error: error instanceof Error ? error.message : 'SCHEDULE_FAILED',
+      });
+    }
+  }
+  return NextResponse.json({
+    data: {
+      assigned: contacts.length,
+      campaignId: campaign.id,
+      scheduleIssues,
+      scheduled,
+    },
+  });
 }

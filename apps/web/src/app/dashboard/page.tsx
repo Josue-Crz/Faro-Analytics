@@ -7,8 +7,10 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { ConnectedDashboard } from '@/components/ConnectedDashboard';
+import { CampaignFundingProgress } from '@/components/CampaignFundingProgress';
 import { MetricCard } from '@/components/MetricCard';
 import { PageHeader } from '@/components/PageHeader';
+import { SponsorshipPortfolioSnapshot } from '@/components/SponsorshipPortfolioSnapshot';
 import { StatusBadge } from '@/components/StatusBadge';
 import {
   bobDrafts,
@@ -19,6 +21,7 @@ import {
   recentActivity,
   sheetSyncRuns,
 } from '@/lib/demo-data';
+import { faroAnnualFundingPlan, faroSponsorshipPortfolio } from '@/lib/sponsorship-portfolio';
 
 const ResponseTrendChart = dynamic(
   () => import('@/components/ResponseTrendChart').then((module) => module.ResponseTrendChart),
@@ -126,9 +129,12 @@ export default function DashboardPage() {
           </>
         }
         description="Faro turns relationship context into a next action, then keeps the evidence, timing, and human review close at hand."
-        eyebrow="Faro signal · Fictional demo"
+        eyebrow="Faro signal · Workspace update + fictional demo"
         title="Know who needs you next"
       />
+
+      <CampaignFundingProgress items={faroSponsorshipPortfolio} plan={faroAnnualFundingPlan} />
+      <SponsorshipPortfolioSnapshot items={faroSponsorshipPortfolio} />
 
       {priorityFollowUp ? (
         <section className="action-brief" aria-labelledby="priority-action-title">
@@ -145,6 +151,14 @@ export default function DashboardPage() {
               <div>
                 <dt>Campaign</dt>
                 <dd>{priorityFollowUp.campaign}</dd>
+              </div>
+              <div>
+                <dt>Initial date</dt>
+                <dd>{new Date(priorityFollowUp.initialAt).toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt>Follow-up date</dt>
+                <dd>{new Date(priorityFollowUp.followUpAt).toLocaleString()}</dd>
               </div>
               <div>
                 <dt>Best window</dt>
@@ -242,6 +256,10 @@ export default function DashboardPage() {
                 <p>
                   {followUp.campaign} · {followUp.reason}
                 </p>
+                <p>
+                  Initial date: {new Date(followUp.initialAt).toLocaleString()} · Follow-up date:{' '}
+                  {new Date(followUp.followUpAt).toLocaleString()}
+                </p>
               </div>
               <div className="list-card__meta">
                 <StatusBadge label={followUp.statusLabel} status={followUp.status} />
@@ -312,7 +330,7 @@ export default function DashboardPage() {
               <p>Open opportunity count and estimated value</p>
             </div>
             <span className="mono" style={{ fontSize: '.75rem' }}>
-              $486k active
+              $487k active
             </span>
           </div>
           <div className="pipeline-list">
@@ -330,8 +348,8 @@ export default function DashboardPage() {
             ))}
           </div>
           <p className="chart-summary">
-            Seven proposals represent $74k. Two negotiation-stage opportunities need a response
-            before Friday.
+            Confirmed cash now includes jolli.ai’s $1,000. Tavily’s credits stay outside monetary
+            totals, and Meta remains an interested lead rather than confirmed value.
           </p>
         </section>
       </div>

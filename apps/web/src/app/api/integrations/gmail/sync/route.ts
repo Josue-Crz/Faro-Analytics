@@ -5,6 +5,7 @@ import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { sessionFromRequest } from '@/lib/server/auth';
+import { recalculateContactNextAction } from '@/lib/server/contact-next-action';
 import { googleAccessToken } from '@/lib/server/google';
 
 const listSchema = z.object({ messages: z.array(z.object({ id: z.string() })).default([]) });
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest) {
 
     let imported = 0;
     let skipped = 0;
+    const touchedContactIds = new Set<string>();
     for (const listedMessage of listed.messages) {
       const response = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(listedMessage.id)}?format=full`,
@@ -142,7 +144,15 @@ export async function POST(request: NextRequest) {
           },
         },
       });
+      touchedContactIds.add(contact.id);
       imported += 1;
+    }
+    const scheduleReferenceTime = new Date();
+    for (const contactId of touchedContactIds) {
+      await recalculateContactNextAction(session.workspaceId, contactId, scheduleReferenceTime, {
+        actorId: session.userId,
+        actorType: 'USER',
+      });
     }
     await prisma.auditEvent.create({
       data: {
@@ -152,11 +162,23 @@ export async function POST(request: NextRequest) {
         entityId: session.userId,
         entityType: 'GoogleCredential',
         id: randomUUID(),
-        metadata: { imported, listed: listed.messages.length, skipped },
+        metadata: {
+          imported,
+          listed: listed.messages.length,
+          rescheduledContacts: touchedContactIds.size,
+          skipped,
+        },
         workspaceId: session.workspaceId,
       },
     });
-    return NextResponse.json({ data: { imported, listed: listed.messages.length, skipped } });
+    return NextResponse.json({
+      data: {
+        imported,
+        listed: listed.messages.length,
+        rescheduledContacts: touchedContactIds.size,
+        skipped,
+      },
+    });
   } catch (error) {
     const code = error instanceof Error ? error.message : 'GMAIL_SYNC_FAILED';
     return NextResponse.json(

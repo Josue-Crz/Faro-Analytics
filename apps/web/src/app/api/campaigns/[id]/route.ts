@@ -7,8 +7,13 @@ import type { NextRequest } from 'next/server';
 import { sessionFromRequest } from '@/lib/server/auth';
 import { campaignContactSourceWhere } from '@/lib/server/campaign-data-source';
 import {
+  recalculateContactNextAction,
+  refreshExpiredContactNextActions,
+} from '@/lib/server/contact-next-action';
+import {
   campaignDateRange,
   campaignManagementRequestSchema,
+  campaignMutationConflictsWithFocus,
 } from '@/lib/server/campaign-management';
 
 const sourceSelect = {
@@ -22,6 +27,25 @@ const sourceSelect = {
   status: true,
   worksheetId: true,
 } as const;
+
+async function rescheduleCampaignContacts(
+  campaignId: string,
+  workspaceId: string,
+  actorId: string,
+) {
+  const memberships = await prisma.campaignContact.findMany({
+    select: { contactId: true },
+    where: { campaignId, workspaceId },
+  });
+  const now = new Date();
+  for (const membership of memberships) {
+    await recalculateContactNextAction(workspaceId, membership.contactId, now, {
+      actorId,
+      actorType: 'USER',
+    });
+  }
+  return memberships.length;
+}
 
 async function cancelPendingCampaignWork(
   database: Prisma.TransactionClient,
@@ -82,6 +106,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const session = await sessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
   const { id } = await context.params;
+  await refreshExpiredContactNextActions(session.workspaceId);
 
   const campaign = await prisma.campaign.findFirst({
     select: {
@@ -109,8 +134,11 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
                 },
               },
               lastName: true,
+              nextActionAt: true,
+              nextActionType: true,
               organization: { select: { industry: true, name: true } },
               source: true,
+              timezone: true,
               title: true,
             },
           },
@@ -125,6 +153,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
           contact: { select: { firstName: true, id: true, lastName: true } },
           dueAt: true,
           id: true,
+          initialAt: true,
           priority: true,
           reason: true,
           status: true,
@@ -155,8 +184,11 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       firstName: true,
       id: true,
       lastName: true,
+      nextActionAt: true,
+      nextActionType: true,
       organization: { select: { industry: true, name: true } },
       source: true,
+      timezone: true,
       title: true,
     },
     take: 1_000,
@@ -183,15 +215,21 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const session = await sessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
   const { id } = await context.params;
-  if (session.focusedCampaignId && session.focusedCampaignId !== id) {
-    return NextResponse.json({ error: 'WORKSPACE_FOCUS_CONFLICT' }, { status: 409 });
-  }
   const parsed = campaignManagementRequestSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
       { error: 'INVALID_CAMPAIGN_UPDATE', issues: parsed.error.flatten().fieldErrors },
       { status: 400 },
     );
+  }
+  if (
+    campaignMutationConflictsWithFocus({
+      action: parsed.data.action,
+      focusedCampaignId: session.focusedCampaignId,
+      targetCampaignId: id,
+    })
+  ) {
+    return NextResponse.json({ error: 'WORKSPACE_FOCUS_CONFLICT' }, { status: 409 });
   }
 
   const campaign = await prisma.campaign.findFirst({
@@ -294,7 +332,11 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
       });
       return saved;
     });
-    return NextResponse.json({ data: updated });
+    const rescheduledContacts =
+      changedFields.includes('startAt') || changedFields.includes('endAt')
+        ? await rescheduleCampaignContacts(campaign.id, session.workspaceId, session.userId)
+        : 0;
+    return NextResponse.json({ data: { ...updated, rescheduledContacts } });
   }
 
   if (campaign.status === 'COMPLETED') {
@@ -321,14 +363,25 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     });
     return saved;
   });
-  return NextResponse.json({ data: completed });
+  const rescheduledContacts = await rescheduleCampaignContacts(
+    campaign.id,
+    session.workspaceId,
+    session.userId,
+  );
+  return NextResponse.json({ data: { ...completed, rescheduledContacts } });
 }
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await sessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
   const { id } = await context.params;
-  if (session.focusedCampaignId && session.focusedCampaignId !== id) {
+  if (
+    campaignMutationConflictsWithFocus({
+      action: 'DELETE',
+      focusedCampaignId: session.focusedCampaignId,
+      targetCampaignId: id,
+    })
+  ) {
     return NextResponse.json({ error: 'WORKSPACE_FOCUS_CONFLICT' }, { status: 409 });
   }
   const campaign = await prisma.campaign.findFirst({
@@ -367,7 +420,17 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     });
     return { cancelled, clearedFocus: clearedFocus.count > 0 };
   });
+  const rescheduledContacts = await rescheduleCampaignContacts(
+    campaign.id,
+    session.workspaceId,
+    session.userId,
+  );
   return NextResponse.json({
-    data: { archivedAt: archivedAt.toISOString(), campaignId: campaign.id, ...result },
+    data: {
+      archivedAt: archivedAt.toISOString(),
+      campaignId: campaign.id,
+      rescheduledContacts,
+      ...result,
+    },
   });
 }

@@ -3,10 +3,14 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 import { sessionFromRequest } from '@/lib/server/auth';
+import { nonArchivedCampaignWorkWhere } from '@/lib/server/campaign-visibility';
+import { refreshExpiredContactNextActions } from '@/lib/server/contact-next-action';
+import { sponsorshipPortfolioItemFromOrganization } from '@/lib/sponsorship-portfolio';
 
 export async function GET(request: NextRequest) {
   const session = await sessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
+  await refreshExpiredContactNextActions(session.workspaceId);
   const focusedCampaignId = session.focusedCampaignId;
   const scopedCampaignContact = focusedCampaignId
     ? {
@@ -19,7 +23,7 @@ export async function GET(request: NextRequest) {
       }
     : {};
   const scopedFollowUp = {
-    campaignId: focusedCampaignId ?? undefined,
+    ...nonArchivedCampaignWorkWhere(focusedCampaignId),
     workspaceId: session.workspaceId,
   };
   const [
@@ -34,6 +38,8 @@ export async function GET(request: NextRequest) {
     connection,
     priorityFollowUps,
     importedFollowUpContacts,
+    nextActions,
+    sponsorshipOrganizations,
     focusedCampaign,
   ] = await Promise.all([
     prisma.contact.count({
@@ -84,7 +90,7 @@ export async function GET(request: NextRequest) {
     }),
     prisma.bobGenerationRequest.count({
       where: {
-        campaignId: focusedCampaignId ?? undefined,
+        ...nonArchivedCampaignWorkWhere(focusedCampaignId),
         status: 'AWAITING_BOB',
         workspaceId: session.workspaceId,
       },
@@ -92,7 +98,7 @@ export async function GET(request: NextRequest) {
     prisma.bobDraft.count({
       where: {
         approvalStatus: 'PENDING_REVIEW',
-        generationRequest: { campaignId: focusedCampaignId ?? undefined },
+        generationRequest: nonArchivedCampaignWorkWhere(focusedCampaignId),
         workspaceId: session.workspaceId,
       },
     }),
@@ -137,6 +143,7 @@ export async function GET(request: NextRequest) {
         },
         dueAt: true,
         id: true,
+        initialAt: true,
         priority: true,
         reason: true,
         recommendedNextAction: true,
@@ -151,6 +158,53 @@ export async function GET(request: NextRequest) {
         deletedAt: null,
         workspaceId: session.workspaceId,
         ...scopedCampaignContact,
+      },
+    }),
+    prisma.contact.findMany({
+      orderBy: { nextActionAt: 'asc' },
+      select: {
+        consentStatus: true,
+        firstName: true,
+        id: true,
+        lastName: true,
+        nextActionAt: true,
+        nextActionType: true,
+        organization: { select: { industry: true, name: true } },
+      },
+      take: 5,
+      where: {
+        deletedAt: null,
+        workspaceId: session.workspaceId,
+        ...scopedCampaignContact,
+      },
+    }),
+    prisma.organization.findMany({
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        customFields: true,
+        id: true,
+        name: true,
+        sponsorshipStage: { select: { name: true } },
+      },
+      take: 100,
+      where: {
+        deletedAt: null,
+        workspaceId: session.workspaceId,
+        ...(focusedCampaignId
+          ? {
+              contacts: {
+                some: {
+                  campaignContacts: {
+                    some: {
+                      campaignId: focusedCampaignId,
+                      workspaceId: session.workspaceId,
+                    },
+                  },
+                  deletedAt: null,
+                },
+              },
+            }
+          : {}),
       },
     }),
     focusedCampaignId
@@ -168,6 +222,9 @@ export async function GET(request: NextRequest) {
     const fields = contact.customFields as Record<string, unknown>;
     return fields.importedFollowUpPending === true && typeof fields.importedFollowUpAt === 'string';
   }).length;
+  const sponsorshipPortfolio = sponsorshipOrganizations
+    .map(sponsorshipPortfolioItemFromOrganization)
+    .filter((item) => item !== null);
   return NextResponse.json({
     data: {
       awaitingBob,
@@ -178,9 +235,11 @@ export async function GET(request: NextRequest) {
       dueNext24Hours,
       followUps: followUps + importedFollowUps,
       importedFollowUps,
+      nextActions,
       organizations,
       overdue,
       priorityFollowUps,
+      sponsorshipPortfolio,
       scope: {
         campaign: focusedCampaign,
         kind: focusedCampaign ? 'CAMPAIGN' : 'WORKSPACE',

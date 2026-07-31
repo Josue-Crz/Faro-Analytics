@@ -24,23 +24,32 @@ function startSheetPolling(): void {
     if (running) return;
     running = true;
     try {
-      const response = await fetch(new URL('/api/cron/google-sheets', webUrl), {
-        headers: { authorization: `Bearer ${secret}` },
-        method: 'POST',
-      });
-      console.info(
-        JSON.stringify({
-          component: 'faro-worker',
-          operation: 'google-sheets-poll',
-          status: response.ok ? 'SUCCEEDED' : `HTTP_${response.status}`,
-        }),
-      );
-    } catch {
-      console.error(
-        JSON.stringify({
-          component: 'faro-worker',
-          operation: 'google-sheets-poll',
-          status: 'REQUEST_FAILED',
+      await Promise.all(
+        [
+          { operation: 'google-sheets-poll', path: '/api/cron/google-sheets' },
+          { operation: 'outreach-schedule-refresh', path: '/api/cron/outreach-schedules' },
+        ].map(async ({ operation, path }) => {
+          try {
+            const response = await fetch(new URL(path, webUrl), {
+              headers: { authorization: `Bearer ${secret}` },
+              method: 'POST',
+            });
+            console.info(
+              JSON.stringify({
+                component: 'faro-worker',
+                operation,
+                status: response.ok ? 'SUCCEEDED' : `HTTP_${response.status}`,
+              }),
+            );
+          } catch {
+            console.error(
+              JSON.stringify({
+                component: 'faro-worker',
+                operation,
+                status: 'REQUEST_FAILED',
+              }),
+            );
+          }
         }),
       );
     } finally {

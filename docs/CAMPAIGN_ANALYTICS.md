@@ -34,8 +34,17 @@ workspace remains readable while new operational actions are disabled.
 Deleting a campaign is a recoverable soft deletion from the active product view. Faro marks it
 archived, cancels the same pending work, preserves historical records and audit evidence, and clears
 that campaign from every member's saved focus so no user remains scoped to a removed workspace.
-Campaign update, completion, and deletion routes all verify the authenticated workspace and reject
-mutations against another actively focused campaign.
+Deleted campaign follow-ups, drafts, and email activity are excluded from active Dashboard,
+Outreach, Follow-ups, and Analytics views. Campaign detail updates and deletion remain available
+without changing app focus; operational source changes and completion still require the user to
+focus that campaign. Every mutation remains scoped to the authenticated workspace.
+
+Assigning a contact also projects its required future action onto the campaign membership. Editing
+campaign dates recalculates every assigned contact against the new active deadline. Completing or
+archiving a campaign removes that deadline from scheduling and recomputes each contact from any
+remaining active campaign and relationship history. An already-expired deadline is never reused;
+Faro chooses a new future action or a dated schedule review. See
+[Contact scheduling](CONTACT_SCHEDULING.md).
 
 Each campaign can associate one `SheetConnection`. When one is selected, Faro accepts contacts
 imported from that exact source and manually managed records; contacts from another Google Sheet
@@ -63,8 +72,9 @@ imported third-party taxonomy or description, bounded company-name/domain rules,
 Wikidata industry data. When none of those yield a specific result, Faro assigns a low-confidence
 best-effort category from the organization's type or domain. Classification source and confidence
 remain visible, while every company stays queryable in one of the canonical categories.
-Recently imported contacts and their consent review actions live under **Contacts**, not on the
-dashboard.
+Recently imported contacts are managed under **Contacts**. Their required future consent-review
+actions also appear in the dashboard's scheduled relationship queue so no contact is left without
+a visible next step.
 
 Contacts can be edited manually from the connected Contacts directory. The mutation is
 workspace-scoped, respects the user's focused-campaign boundary, rejects duplicate workspace email

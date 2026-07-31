@@ -45,8 +45,8 @@ const primaryNav = [
   { href: '/organizations', label: 'Organizations', icon: Enterprise },
   { href: '/campaigns', label: 'Campaigns', icon: Bullhorn },
   { href: '/outreach', label: 'Outreach', icon: Email },
-  { href: '/follow-ups', label: 'Follow-ups', icon: Task, badge: '18' },
-  { href: '/analytics', label: 'Analytics (Soon)', icon: Analytics },
+  { href: '/follow-ups', label: 'Follow-ups (soon)', icon: Task, badge: '18' },
+  { href: '/analytics', label: 'Analytics (soon)', icon: Analytics },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -207,7 +207,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span>{focusedCampaign?.name ?? identity.workspaceName}</span>
             <span aria-hidden="true">›</span>
           </Link>
-          {identity.fallback ? <span className="header-date">Fictional preview</span> : null}
+          {identity.fallback ? <span className="header-date">Portfolio preview</span> : null}
         </div>
         <HeaderGlobalBar>
           <button
@@ -281,7 +281,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               href="/settings/notifications"
               isActive={pathname === '/settings/notifications'}
             >
-              Notifications (Soon)
+              Notifications (soon)
             </SideNavLink>
             <SideNavLink href="/settings/workspace" isActive={pathname === '/settings/workspace'}>
               Workspace
@@ -297,7 +297,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   ? 'Campaign-focused workspace'
                   : 'Connected workspace'
                 : identity.fallback
-                  ? 'Demo fallback'
+                  ? 'Portfolio preview'
                   : 'Workspace not connected'}
             </strong>
             <small>
@@ -306,7 +306,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   ? focusedCampaign.name
                   : 'Google-authenticated tester'
                 : identity.fallback
-                  ? 'OAuth failed · fictional data'
+                  ? 'OAuth failed · workspace snapshot + demo data'
                   : 'Sign in to begin with empty data'}
             </small>
           </span>

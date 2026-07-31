@@ -13,23 +13,39 @@ import {
 import { Button, InlineNotification, TextArea, TextInput } from '@carbon/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 import { categorizeOrganization, COMPANY_CATEGORIES } from '@faro/core';
+import type { SponsorshipPortfolioItem } from '@/lib/sponsorship-portfolio';
 
-import { groupCompaniesByIndustry } from '@/lib/company-categories';
+import {
+  COMPANY_CATEGORY_REFERENCE_SOURCES,
+  groupCompaniesByIndustry,
+  summarizeCompanyCategorySources,
+} from '@/lib/company-categories';
+import { findAssociatedOutreachRequest, outreachRequestHref } from '@/lib/follow-up-outreach';
 
 import { CampaignPulseChart } from './CampaignPulseChart';
 import { CompanyCategoryGraph } from './CompanyCategoryGraph';
+import { ContactScheduleEditor } from './ContactScheduleEditor';
 import { MetricCard } from './MetricCard';
 import { OutreachPlanningCalendar } from './OutreachPlanningCalendar';
 import { PageHeader } from './PageHeader';
+import { SponsorshipPortfolioSnapshot } from './SponsorshipPortfolioSnapshot';
 import { StatusBadge } from './StatusBadge';
 
 interface Records {
   bobRequests: Array<{
+    campaignId: string;
     contactId: string;
-    draft: { approvalStatus: string; bodyText: string; id: string; subject: string } | null;
+    draft: {
+      approvalStatus: string;
+      bodyText: string;
+      id: string;
+      provenance: 'DEMO_DRAFT' | 'IBM_BOB';
+      subject: string;
+    } | null;
+    followUpTaskId: string | null;
     id: string;
     requestedAt: string;
     status: string;
@@ -60,6 +76,8 @@ interface Records {
     firstName: string;
     id: string;
     lastName: string;
+    nextActionAt: string;
+    nextActionType: string;
     organization: {
       industry: string;
       name: string;
@@ -98,11 +116,17 @@ interface Records {
     };
     dueAt: string;
     id: string;
+    initialAt: string;
     priority: string;
     reason: string;
     status: string;
   }>;
-  importedFollowUps: Array<{ contactId: string; contactName: string; dueAt: string }>;
+  importedFollowUps: Array<{
+    contactId: string;
+    contactName: string;
+    dueAt: string;
+    initialAt: string;
+  }>;
   interactions: Array<{
     bodyText: string;
     campaign: { name: string } | null;
@@ -113,6 +137,7 @@ interface Records {
     subject: string | null;
   }>;
   planningReferenceTime: string;
+  sponsorshipPortfolio: SponsorshipPortfolioItem[];
   organizations: Array<{
     _count: { contacts: number };
     categoryConfidence: 'HIGH' | 'MEDIUM' | 'LOW' | null;
@@ -192,7 +217,7 @@ interface CampaignAnalytics {
 
 const routeTitles: Record<string, [string, string]> = {
   '/analytics': [
-    'Analytics (Soon)',
+    'Analytics',
     'Choose a question, compare campaigns, and turn workspace activity into one clear next step.',
   ],
   '/campaigns': [
@@ -266,6 +291,18 @@ function campaignDateLabel(startAt: string | null, endAt: string | null): string
   return `${format(startAt)} – ${format(endAt)}`;
 }
 
+function subscribeToLocation() {
+  return () => undefined;
+}
+
+function browserLocationSearch() {
+  return window.location.search;
+}
+
+function serverLocationSearch() {
+  return '';
+}
+
 export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
   const router = useRouter();
   const route =
@@ -276,12 +313,13 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
   const [campaignObjective, setCampaignObjective] = useState('');
   const [campaignSourceId, setCampaignSourceId] = useState('');
   const [campaignType, setCampaignType] = useState('SPONSORSHIP');
+  const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null);
   const [followUpCampaignId, setFollowUpCampaignId] = useState('');
   const [notice, setNotice] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<CampaignAnalytics[]>([]);
   const [analyticsCampaignId, setAnalyticsCampaignId] = useState('');
 
-  async function load() {
+  const load = useCallback(async () => {
     const response = await fetch('/api/workspace/records', { cache: 'no-store' });
     if (!response.ok) throw new Error('records');
     const result = (await response.json()) as { data: Records };
@@ -291,20 +329,22 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
         result.data.scope.campaign?.id ?? (current || result.data.campaigns[0]?.id || ''),
     );
     setCampaignSourceId((current) => current || result.data.dataSources[0]?.id || '');
-  }
-  useEffect(() => {
-    void fetch('/api/workspace/records', { cache: 'no-store' })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('records');
-        return (await response.json()) as { data: Records };
-      })
-      .then((result) => {
-        setData(result.data);
-        setFollowUpCampaignId(result.data.scope.campaign?.id ?? result.data.campaigns[0]?.id ?? '');
-        setCampaignSourceId(result.data.dataSources[0]?.id ?? '');
-      })
-      .catch(() => setError(true));
   }, []);
+  useEffect(() => {
+    const initial = window.setTimeout(() => void load().catch(() => setError(true)), 0);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load().catch(() => setError(true));
+    }, 30_000);
+    const refreshVisible = () => {
+      if (document.visibilityState === 'visible') void load().catch(() => setError(true));
+    };
+    document.addEventListener('visibilitychange', refreshVisible);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refreshVisible);
+    };
+  }, [load]);
 
   useEffect(() => {
     if (route !== '/analytics') return;
@@ -341,6 +381,29 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
     setNotice('Campaign workspace created as a draft.');
     await load();
     router.push(`/campaigns/${encodeURIComponent(result.data.id)}`);
+  }
+
+  async function deleteCampaign(campaign: Records['campaigns'][number]) {
+    if (
+      !window.confirm(
+        `Delete “${campaign.name}”? It will disappear throughout Faro, its pending work will be cancelled, and saved historical records will remain available for audit purposes.`,
+      )
+    ) {
+      return;
+    }
+    setDeletingCampaignId(campaign.id);
+    const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}`, {
+      method: 'DELETE',
+    });
+    setDeletingCampaignId(null);
+    if (!response.ok) {
+      setNotice(`Faro could not delete ${campaign.name}.`);
+      return;
+    }
+    setNotice(`${campaign.name} was deleted from active campaign views.`);
+    window.dispatchEvent(new Event('faro:workspace-context-changed'));
+    await load();
+    router.refresh();
   }
 
   async function activateImportedFollowUps() {
@@ -546,13 +609,33 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
                       </small>
                     </span>
                   </div>
-                  <Link
-                    aria-label={`Open ${campaign.name} campaign workspace`}
-                    className="campaign-workspace-card__open"
-                    href={`/campaigns/${encodeURIComponent(campaign.id)}`}
-                  >
-                    Open campaign <ArrowRight aria-hidden size={16} />
-                  </Link>
+                  <div className="campaign-workspace-card__actions">
+                    <Button
+                      href={`/campaigns/${encodeURIComponent(campaign.id)}`}
+                      kind="primary"
+                      renderIcon={ArrowRight}
+                      size="sm"
+                    >
+                      Open
+                    </Button>
+                    <Button
+                      href={`/campaigns/${encodeURIComponent(campaign.id)}?edit=1#campaign-management-title`}
+                      kind="secondary"
+                      renderIcon={Edit}
+                      size="sm"
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      disabled={Boolean(deletingCampaignId)}
+                      kind="danger--ghost"
+                      onClick={() => void deleteCampaign(campaign)}
+                      renderIcon={TrashCan}
+                      size="sm"
+                    >
+                      {deletingCampaignId === campaign.id ? 'Deleting…' : 'Delete'}
+                    </Button>
+                  </div>
                 </article>
               ))}
               {!data.campaigns.length ? (
@@ -570,23 +653,48 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
         <ContactDirectory
           campaigns={data.campaigns}
           contacts={data.contacts}
+          followUps={data.followUps}
           reload={load}
           scope={data.scope}
         />
       ) : null}
       {route === '/organizations' ? (
-        <OrganizationRoster
-          campaignFocused={data.scope.kind === 'CAMPAIGN'}
-          organizations={data.organizations}
-          trashedOrganizations={data.trashedOrganizations}
-          updateTrash={updateOrganizationTrash}
-        />
+        <>
+          <SponsorshipPortfolioSnapshot
+            items={data.sponsorshipPortfolio}
+            title="Faro Analytics sponsor update"
+          />
+          <OrganizationRoster
+            campaignFocused={data.scope.kind === 'CAMPAIGN'}
+            organizations={data.organizations}
+            trashedOrganizations={data.trashedOrganizations}
+            updateTrash={updateOrganizationTrash}
+          />
+        </>
       ) : null}
       {route === '/follow-ups' ? (
         <>
           {data.importedFollowUps.length ? (
             <section className="panel">
               <h2>Assign imported follow-ups</h2>
+              <ul className="plain-list">
+                {data.importedFollowUps.slice(0, 10).map((followUp) => (
+                  <li key={followUp.contactId}>
+                    <strong>{followUp.contactName}</strong> · Initial date{' '}
+                    <strong>
+                      <time dateTime={followUp.initialAt}>
+                        {new Date(followUp.initialAt).toLocaleString()}
+                      </time>
+                    </strong>{' '}
+                    · Follow-up date{' '}
+                    <strong>
+                      <time dateTime={followUp.dueAt}>
+                        {new Date(followUp.dueAt).toLocaleString()}
+                      </time>
+                    </strong>
+                  </li>
+                ))}
+              </ul>
               {data.campaigns.length ? (
                 <div className="sheet-preview-actions">
                   <label>
@@ -620,7 +728,7 @@ export function ConnectedWorkspaceRecords({ pathname }: { pathname: string }) {
               )}
             </section>
           ) : null}
-          <FollowUpDirectory followUps={data.followUps} />
+          <FollowUpDirectory bobRequests={data.bobRequests} followUps={data.followUps} />
           {data.importedFollowUps.length ? (
             <InlineNotification
               hideCloseButton
@@ -714,11 +822,13 @@ const contactChannels = ['EMAIL', 'PHONE', 'SMS', 'MEETING', 'SOCIAL', 'OTHER'] 
 function ContactDirectory({
   campaigns,
   contacts,
+  followUps,
   reload,
   scope,
 }: {
   campaigns: Records['campaigns'];
   contacts: Records['contacts'];
+  followUps: Records['followUps'];
   reload: () => Promise<void>;
   scope: Records['scope'];
 }) {
@@ -962,6 +1072,10 @@ function ContactDirectory({
                     {contact.type} · {contact.consentStatus} · updated{' '}
                     {new Date(contact.updatedAt).toLocaleString()}
                   </p>
+                  <p>
+                    {contact.nextActionType.replaceAll('_', ' ').toLocaleLowerCase()}:{' '}
+                    <strong>{new Date(contact.nextActionAt).toLocaleString()}</strong>
+                  </p>
                 </div>
                 <div className="page-actions">
                   <Button
@@ -1002,6 +1116,18 @@ function ContactDirectory({
                   ) : null}
                 </div>
               </div>
+              <ContactScheduleEditor
+                campaigns={campaigns}
+                consentStatus={contact.consentStatus}
+                contactId={contact.id}
+                contactName={`${contact.firstName} ${contact.lastName}`}
+                followUps={followUps.filter((followUp) => followUp.contact.id === contact.id)}
+                reload={reload}
+                returnTo="/contacts"
+                scopeCampaignId={scope.campaign?.id}
+                source={contact.source}
+                timeZone={contact.timezone}
+              />
               {editing ? (
                 <form
                   className="contact-edit-form"
@@ -1119,7 +1245,13 @@ function ContactDirectory({
   );
 }
 
-function FollowUpDirectory({ followUps }: { followUps: Records['followUps'] }) {
+function FollowUpDirectory({
+  bobRequests,
+  followUps,
+}: {
+  bobRequests: Records['bobRequests'];
+  followUps: Records['followUps'];
+}) {
   const [industry, setIndustry] = useState('All categories');
   const [query, setQuery] = useState('');
   const visible = followUps.filter(
@@ -1157,18 +1289,107 @@ function FollowUpDirectory({ followUps }: { followUps: Records['followUps'] }) {
           </select>
         </div>
       </div>
-      <RecordList
-        empty={
-          followUps.length
-            ? 'No follow-ups match this search and category filter.'
-            : 'No active follow-up tasks. Create a campaign and assign contacts before activating pending dates.'
-        }
-        rows={visible.map((item) => ({
-          id: item.id,
-          primary: `${item.contact.firstName} ${item.contact.lastName}`,
-          secondary: `${item.campaign.name} · ${item.contact.organization?.name ?? 'No company'} · ${categoryDisplayLabel(item.contact.organization)} · ${new Date(item.dueAt).toLocaleString()} · ${item.status} · ${item.reason}`,
-        }))}
-      />
+      <section className="panel panel--flush follow-up-records" aria-label="Assigned follow-ups">
+        {visible.length ? (
+          visible.map((item) => {
+            const request = findAssociatedOutreachRequest(bobRequests, {
+              campaignId: item.campaign.id,
+              contactId: item.contact.id,
+              id: item.id,
+            });
+            const draft = request?.draft;
+            return (
+              <article className="follow-up-record" key={item.id}>
+                <header className="follow-up-record__header">
+                  <div>
+                    <p className="eyebrow">{item.campaign.name}</p>
+                    <h3>
+                      {item.contact.firstName} {item.contact.lastName}
+                    </h3>
+                    <p>
+                      {item.contact.organization?.name ?? 'No company'} ·{' '}
+                      {categoryDisplayLabel(item.contact.organization)}
+                    </p>
+                  </div>
+                  <span className="faro-tag">{item.status.replaceAll('_', ' ')}</span>
+                </header>
+                <dl className="follow-up-record__dates" aria-label="Assigned follow-up dates">
+                  <div>
+                    <dt>Initial outreach</dt>
+                    <dd>
+                      <time dateTime={item.initialAt}>
+                        {new Date(item.initialAt).toLocaleString()}
+                      </time>
+                    </dd>
+                  </div>
+                  <div className="follow-up-record__date--due">
+                    <dt>Follow-up due</dt>
+                    <dd>
+                      <time dateTime={item.dueAt}>{new Date(item.dueAt).toLocaleString()}</time>
+                    </dd>
+                  </div>
+                </dl>
+                <p className="follow-up-record__reason">
+                  <strong>{item.priority} priority:</strong> {item.reason}
+                </p>
+                {draft ? (
+                  <section
+                    aria-label={`Outreach message for ${item.contact.firstName} ${item.contact.lastName}`}
+                    className="follow-up-record__message"
+                  >
+                    <div className="follow-up-record__message-heading">
+                      <div>
+                        <p className="eyebrow">Associated outreach message</p>
+                        <h4>{draft.subject}</h4>
+                      </div>
+                      <span className="status-badge status-badge--attention">
+                        {draft.provenance === 'IBM_BOB' ? 'Generated by IBM Bob' : 'Demo draft'}
+                      </span>
+                    </div>
+                    <p>{draft.bodyText}</p>
+                    <div className="page-actions">
+                      <Button
+                        href={outreachRequestHref(request)}
+                        kind="secondary"
+                        renderIcon={ArrowRight}
+                        size="sm"
+                      >
+                        Open this message in Outreach
+                      </Button>
+                    </div>
+                  </section>
+                ) : request ? (
+                  <div className="follow-up-record__message follow-up-record__message--empty">
+                    <p>
+                      Outreach request {request.id} is{' '}
+                      {request.status.replaceAll('_', ' ').toLocaleLowerCase()}; it has no saved
+                      message yet.
+                    </p>
+                    <Button
+                      href={outreachRequestHref(request)}
+                      kind="ghost"
+                      renderIcon={ArrowRight}
+                      size="sm"
+                    >
+                      Open request in Outreach
+                    </Button>
+                  </div>
+                ) : (
+                  <p className="follow-up-record__no-message">
+                    No outreach message is associated with this contact yet.
+                  </p>
+                )}
+              </article>
+            );
+          })
+        ) : (
+          <p style={{ padding: '1.25rem' }}>
+            {followUps.length
+              ? 'No follow-ups match this search and category filter.'
+              : 'No active follow-up tasks. Create a campaign and assign contacts before activating pending dates.'}
+          </p>
+        )}
+      </section>
     </>
   );
 }
@@ -1188,6 +1409,15 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
   const [industry, setIndustry] = useState('All categories');
   const [query, setQuery] = useState('');
   const [roleDraft, setRoleDraft] = useState('');
+  const locationSearch = useSyncExternalStore(
+    subscribeToLocation,
+    browserLocationSearch,
+    serverLocationSearch,
+  );
+  const deepLink = new URLSearchParams(locationSearch);
+  const targetContactId = deepLink.get('contact') ?? '';
+  const targetDraftId = deepLink.get('draft') ?? '';
+  const targetRequestId = deepLink.get('request') ?? '';
   const visibleContacts = records.contacts.filter(
     (contact) =>
       `${contact.firstName} ${contact.lastName} ${contact.email ?? ''} ${contact.organization?.name ?? ''}`
@@ -1196,6 +1426,24 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
         .includes(query.toLocaleLowerCase('en-US')) &&
       (industry === 'All categories' || categoryDisplayLabel(contact.organization) === industry),
   );
+
+  useEffect(() => {
+    if (!targetContactId) return;
+    const details = document.getElementById(
+      `outreach-contact-${targetContactId}`,
+    ) as HTMLDetailsElement | null;
+    if (details) details.open = true;
+    const targetId = targetDraftId
+      ? `outreach-draft-${targetDraftId}`
+      : targetRequestId
+        ? `outreach-request-${targetRequestId}`
+        : `outreach-contact-${targetContactId}`;
+    window.requestAnimationFrame(() => {
+      const target = document.getElementById(targetId);
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: 'center' });
+    });
+  }, [targetContactId, targetDraftId, targetRequestId]);
 
   async function copyDraftText(draftId: string, value: string) {
     await navigator.clipboard.writeText(value);
@@ -1416,8 +1664,22 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
             direction: interaction.direction,
             occurredAt: interaction.occurredAt,
           }))}
-          key={`${campaignId || 'general'}:${records.planningReferenceTime}`}
+          key={campaignId || 'general'}
           referenceTime={records.planningReferenceTime}
+          schedules={records.followUps
+            .filter(
+              (followUp) =>
+                ['OPEN', 'SNOOZED'].includes(followUp.status) &&
+                (!campaignId || followUp.campaign.id === campaignId),
+            )
+            .map((followUp) => ({
+              campaignId: followUp.campaign.id,
+              contactId: followUp.contact.id,
+              contactName: `${followUp.contact.firstName} ${followUp.contact.lastName}`,
+              dueAt: followUp.dueAt,
+              id: followUp.id,
+              initialAt: followUp.initialAt,
+            }))}
           workspace={{
             id: records.workspace.id,
             quietHoursEnd: records.workspace.quietHoursEnd,
@@ -1438,7 +1700,7 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
           labelText="Extra context for the next IBM Bob draft"
           maxCount={3500}
           onChange={(event) => setBobContext(event.target.value)}
-          placeholder="Example: SF Hacks 2027 is in February. Ask for a 20-minute sponsorship conversation and mention the student developer audience."
+          placeholder="Example: The student developer summit is six weeks away. Ask for a 20-minute sponsorship conversation and mention the attendee audience."
           value={bobContext}
         />
         <TextArea
@@ -1536,9 +1798,20 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
         {visibleContacts.map((contact) => {
           const emails = records.interactions.filter((item) => item.contact.id === contact.id);
           const followUps = records.followUps.filter((item) => item.contact.id === contact.id);
-          const bobRequest = records.bobRequests.find((item) => item.contactId === contact.id);
+          const bobRequest =
+            records.bobRequests.find(
+              (item) =>
+                item.contactId === contact.id &&
+                ((targetDraftId && item.draft?.id === targetDraftId) ||
+                  (targetRequestId && item.id === targetRequestId)),
+            ) ?? records.bobRequests.find((item) => item.contactId === contact.id);
           return (
-            <details className="list-card" key={contact.id} style={{ display: 'block' }}>
+            <details
+              className="list-card"
+              id={`outreach-contact-${contact.id}`}
+              key={contact.id}
+              style={{ display: 'block' }}
+            >
               <summary style={{ cursor: 'pointer' }}>
                 <strong>
                   {contact.firstName} {contact.lastName}
@@ -1607,10 +1880,23 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
                 ) : null}
                 {followUps.map((followUp) => (
                   <p key={followUp.id}>
-                    <strong>Follow-up:</strong> {new Date(followUp.dueAt).toLocaleString()} ·{' '}
+                    <strong>Initial date:</strong> {new Date(followUp.initialAt).toLocaleString()} ·{' '}
+                    <strong>Follow-up date:</strong> {new Date(followUp.dueAt).toLocaleString()} ·{' '}
                     {followUp.reason}
                   </p>
                 ))}
+                <ContactScheduleEditor
+                  campaigns={records.campaigns}
+                  consentStatus={contact.consentStatus}
+                  contactId={contact.id}
+                  contactName={`${contact.firstName} ${contact.lastName}`}
+                  followUps={followUps}
+                  reload={reload}
+                  returnTo="/outreach"
+                  scopeCampaignId={records.scope.campaign?.id}
+                  source={contact.source}
+                  timeZone={contact.timezone}
+                />
                 {emails.slice(0, 20).map((email) => (
                   <article
                     key={email.id}
@@ -1665,15 +1951,21 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
                 ) : null}
                 {bobRequest ? (
                   <section
-                    aria-label="Latest IBM Bob draft"
+                    aria-label="Associated outreach request"
+                    id={
+                      bobRequest.draft
+                        ? `outreach-draft-${bobRequest.draft.id}`
+                        : `outreach-request-${bobRequest.id}`
+                    }
                     style={{
                       borderTop: '1px solid var(--cds-border-subtle)',
                       marginTop: '0.75rem',
                       paddingTop: '0.75rem',
                     }}
+                    tabIndex={-1}
                   >
                     <p>
-                      <strong>Latest IBM Bob request:</strong>{' '}
+                      <strong>Associated outreach request:</strong>{' '}
                       {bobRequest.draft
                         ? `Draft ready · ${bobRequest.draft.approvalStatus}`
                         : bobRequest.status}
@@ -1684,7 +1976,11 @@ function OutreachCenter({ records, reload }: { records: Records; reload: () => P
                     </p>
                     {bobRequest.draft ? (
                       <div aria-label="Proposed email" style={{ marginTop: '0.75rem' }}>
-                        <h3>Proposed email</h3>
+                        <h3>
+                          {bobRequest.draft.provenance === 'IBM_BOB'
+                            ? 'Generated by IBM Bob'
+                            : 'Demo draft'}
+                        </h3>
                         <p>
                           <strong>Subject Line</strong>
                           <br />
@@ -1786,6 +2082,9 @@ function OrganizationRoster({
     visible,
     (organization) => categoryDisplayLabel(organization),
     (organization) => organization._count.contacts,
+  );
+  const categorySources = summarizeCompanyCategorySources(
+    organizations.map((organization) => organization.categorySource),
   );
   const organizationRow = (organization: Records['organizations'][number]) => {
     const open = expanded.includes(organization.id);
@@ -2017,6 +2316,81 @@ function OrganizationRoster({
           )}
         </section>
       ) : null}
+      <aside
+        aria-labelledby="organization-category-method-title"
+        className="organization-category-note"
+      >
+        <div>
+          <p className="eyebrow">Category methodology</p>
+          <h2 id="organization-category-method-title">How these companies were categorized</h2>
+        </div>
+        <dl aria-label="Category sources across active organizations">
+          <div>
+            <dt>Sheet category</dt>
+            <dd>{categorySources.sourceField}</dd>
+          </div>
+          <div>
+            <dt>Imported taxonomy</dt>
+            <dd>{categorySources.importedTaxonomy}</dd>
+          </div>
+          <div>
+            <dt>Wikidata</dt>
+            <dd>{categorySources.wikidata}</dd>
+          </div>
+          <div>
+            <dt>Name/domain rules</dt>
+            <dd>{categorySources.nameOrDomain}</dd>
+          </div>
+          <div>
+            <dt>Best effort</dt>
+            <dd>{categorySources.bestEffort}</dd>
+          </div>
+          {categorySources.unrecorded ? (
+            <div>
+              <dt>Legacy / unrecorded</dt>
+              <dd>{categorySources.unrecorded}</dd>
+            </div>
+          ) : null}
+        </dl>
+        <p>
+          Faro first normalizes an explicit industry or sector from the connected Sheet. Imported
+          taxonomy columns can include LinkedIn Industry, Crunchbase or Clearbit categories,{' '}
+          <a
+            aria-label={`${COMPANY_CATEGORY_REFERENCE_SOURCES.gics.label} source (opens in a new tab)`}
+            href={COMPANY_CATEGORY_REFERENCE_SOURCES.gics.href}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {COMPANY_CATEGORY_REFERENCE_SOURCES.gics.label}
+          </a>
+          ,{' '}
+          <a
+            aria-label={`${COMPANY_CATEGORY_REFERENCE_SOURCES.naics.label} source (opens in a new tab)`}
+            href={COMPANY_CATEGORY_REFERENCE_SOURCES.naics.href}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {COMPANY_CATEGORY_REFERENCE_SOURCES.naics.label}
+          </a>
+          , and SIC descriptions. Those values come from your Sheet; Faro does not contact those
+          providers.
+        </p>
+        <p>
+          <strong>Direct third-party lookup:</strong> when local evidence is unresolved, Faro can
+          verify a company match and read{' '}
+          <a
+            aria-label={`${COMPANY_CATEGORY_REFERENCE_SOURCES.wikidata.label} source (opens in a new tab)`}
+            href={COMPANY_CATEGORY_REFERENCE_SOURCES.wikidata.href}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {COMPANY_CATEGORY_REFERENCE_SOURCES.wikidata.label}
+          </a>
+          . A supplied website must match the Wikidata official website; otherwise Faro requires one
+          exact-name company match. Remaining companies use bounded name/domain rules or a visibly
+          lower-confidence best-effort category.
+        </p>
+      </aside>
     </>
   );
 }
@@ -2130,30 +2504,5 @@ function CampaignAnalyticsView({
         </p>
       </section>
     </>
-  );
-}
-
-function RecordList({
-  empty,
-  rows,
-}: {
-  empty: string;
-  rows: Array<{ id: string; primary: string; secondary: string }>;
-}) {
-  return (
-    <section className="panel panel--flush">
-      {rows.length ? (
-        rows.map((row) => (
-          <div className="list-card" key={row.id}>
-            <div>
-              <h3>{row.primary}</h3>
-              <p>{row.secondary}</p>
-            </div>
-          </div>
-        ))
-      ) : (
-        <p style={{ padding: '1.25rem' }}>{empty}</p>
-      )}
-    </section>
   );
 }

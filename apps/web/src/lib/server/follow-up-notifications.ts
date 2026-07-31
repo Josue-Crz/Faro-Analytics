@@ -9,6 +9,11 @@ import {
 } from '@faro/notifications';
 import { randomUUID } from 'node:crypto';
 
+import { followUpNotificationPolicy } from './follow-up-notification-policy';
+import {
+  refreshExpiredContactNextActions,
+  rollForwardNotifiedFollowUps,
+} from './contact-next-action';
 import { notificationPreferences } from './notification-preferences';
 import { createTwilioSmsAdapter, smsAdapterMode } from './twilio';
 
@@ -20,17 +25,37 @@ interface NotificationRunSummary {
   failed: number;
   previewed: number;
   retried: number;
+  rescheduledFollowUps: number;
   scheduledSms: number;
   skipped: number;
+  smsUnavailable: number;
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
 }
 
-function reminderText(reason: string, campaignName: string): string {
+function reminderInstant(value: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+    timeZone,
+    timeZoneName: 'short',
+    year: 'numeric',
+  }).format(value);
+}
+
+function reminderText(
+  reason: string,
+  campaignName: string,
+  initialAt: Date,
+  dueAt: Date,
+  timeZone: string,
+): string {
   const normalized = reason.replace(/\s+/g, ' ').trim().slice(0, 220);
-  return `${campaignName} · ${normalized}`;
+  return `${campaignName} · Initial date: ${reminderInstant(initialAt, timeZone)} · Follow-up date: ${reminderInstant(dueAt, timeZone)} · ${normalized}`;
 }
 
 function retryable(errorCode: string | null): boolean {
@@ -46,7 +71,8 @@ function deliveryStatus(
 }
 
 /**
- * Creates one workspace-scoped reminder per follow-up/channel/due instant, then processes due SMS.
+ * Creates one workspace-scoped reminder per follow-up/channel/due instant, including an SMS record
+ * for every due follow-up. SMS delivery still requires a verified, consenting internal assignee.
  * The database row is claimed before a provider call so overlapping cron runs cannot double-send.
  */
 export async function runFollowUpNotifications(
@@ -60,13 +86,18 @@ export async function runFollowUpNotifications(
     failed: 0,
     previewed: 0,
     retried: 0,
+    rescheduledFollowUps: 0,
     scheduledSms: 0,
     skipped: 0,
+    smsUnavailable: 0,
   };
   const workspaceScopes = await prisma.workspace.findMany({
     orderBy: { id: 'asc' },
     select: { id: true },
   });
+  for (const scope of workspaceScopes) {
+    await refreshExpiredContactNextActions(scope.id, now);
+  }
   const upcoming = (
     await Promise.all(
       workspaceScopes.map((scope) =>
@@ -113,14 +144,11 @@ export async function runFollowUpNotifications(
       followUp.assignedUser.notificationPreferences,
       followUp.workspace,
     );
-    if (
-      preferences.highPriorityOnly &&
-      followUp.priority !== 'HIGH' &&
-      followUp.priority !== 'URGENT'
-    ) {
-      summary.skipped += 1;
-      continue;
-    }
+    const policy = followUpNotificationPolicy(
+      preferences,
+      followUp.priority,
+      followUp.assignedUser,
+    );
     const desiredAt = new Date(followUp.dueAt.getTime() - preferences.followUpLeadMinutes * 60_000);
     const readyAt = notificationScheduledAtOrAfter(desiredAt, now);
     const scheduledFor = notificationScheduledAtOrAfter(
@@ -138,11 +166,18 @@ export async function runFollowUpNotifications(
 
     const contactName = `${followUp.contact.firstName} ${followUp.contact.lastName}`.trim();
     const title = `Follow-up due: ${contactName}`;
-    const message = reminderText(followUp.reason, followUp.campaign.name);
+    const assigneeTimeZone = followUp.assignedUser.timezone || followUp.workspace.defaultTimezone;
+    const message = reminderText(
+      followUp.reason,
+      followUp.campaign.name,
+      followUp.initialAt,
+      followUp.dueAt,
+      assigneeTimeZone,
+    );
     const actionUrl = `/follow-ups?task=${encodeURIComponent(followUp.id)}`;
     let createdAny = false;
 
-    if (preferences.inApp) {
+    if (policy.inApp) {
       try {
         await prisma.notification.create({
           data: {
@@ -168,7 +203,7 @@ export async function runFollowUpNotifications(
       }
     }
 
-    if (preferences.email) {
+    if (policy.emailPreview) {
       try {
         await prisma.notification.create({
           data: {
@@ -199,34 +234,31 @@ export async function runFollowUpNotifications(
       }
     }
 
-    if (
-      preferences.sms &&
-      followUp.assignedUser.smsPhone &&
-      followUp.assignedUser.smsVerifiedAt &&
-      followUp.assignedUser.smsConsentAt &&
-      !followUp.assignedUser.smsOptedOutAt
-    ) {
-      try {
-        await prisma.notification.create({
-          data: {
-            channel: 'SMS',
-            deduplicationKey: `${followUp.id}:sms:${followUp.dueAt.toISOString()}`,
-            followUpTaskId: followUp.id,
-            id: randomUUID(),
-            message,
-            payload: { href: actionUrl, internalOnly: true, kind: 'FOLLOW_UP' },
-            scheduledFor,
-            status: 'SCHEDULED',
-            title,
-            userId: followUp.assignedUser.id,
-            workspaceId: followUp.workspaceId,
-          },
-        });
+    try {
+      await prisma.notification.create({
+        data: {
+          channel: 'SMS',
+          deduplicationKey: `${followUp.id}:sms:${followUp.dueAt.toISOString()}`,
+          errorCode: policy.sms ? null : 'SMS_RECIPIENT_NOT_READY',
+          followUpTaskId: followUp.id,
+          id: randomUUID(),
+          message,
+          payload: { href: actionUrl, internalOnly: true, kind: 'FOLLOW_UP' },
+          scheduledFor,
+          status: policy.sms ? 'SCHEDULED' : 'CANCELLED',
+          title,
+          userId: followUp.assignedUser.id,
+          workspaceId: followUp.workspaceId,
+        },
+      });
+      if (policy.sms) {
         summary.scheduledSms += 1;
-        createdAny = true;
-      } catch (error) {
-        if (!isUniqueConstraintError(error)) throw error;
+      } else {
+        summary.smsUnavailable += 1;
       }
+      createdAny = true;
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
     }
 
     if (createdAny) {
@@ -320,7 +352,6 @@ export async function runFollowUpNotifications(
     if (claimed.count !== 1) continue;
 
     if (
-      !preferences.sms ||
       !notification.user.smsPhone ||
       !notification.user.smsVerifiedAt ||
       !notification.user.smsConsentAt ||
@@ -406,5 +437,6 @@ export async function runFollowUpNotifications(
     if (result.status === 'FAILED') summary.failed += 1;
   }
 
+  summary.rescheduledFollowUps = await rollForwardNotifiedFollowUps(now);
   return summary;
 }

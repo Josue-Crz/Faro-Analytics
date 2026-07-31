@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { contactSheetWritePlan, sheetColumnName } from './contact-sheet-writeback';
+import {
+  contactScheduleSheetWritePlan,
+  contactSheetWritePlan,
+  sheetColumnName,
+} from './contact-sheet-writeback';
 
 const fields = {
   email: 'person@example.org',
@@ -83,5 +87,52 @@ describe('contact Google Sheet write-back planning', () => {
     expect(sheetColumnName(25)).toBe('Z');
     expect(sheetColumnName(26)).toBe('AA');
     expect(sheetColumnName(701)).toBe('ZZ');
+  });
+
+  it('writes schedule instants into existing canonical date columns in the Sheet timezone', () => {
+    const plan = contactScheduleSheetWritePlan({
+      followUpAt: new Date('2026-08-03T17:30:00.000Z'),
+      headers: ['Contact Name', 'Initial Contact Date', 'Follow-Up Date'],
+      initialOutreachAt: new Date('2026-07-30T17:30:00.000Z'),
+      mappings: [],
+      timeZone: 'America/Los_Angeles',
+    });
+
+    expect(plan.newMappings).toEqual([]);
+    expect(plan.cells).toEqual([
+      expect.objectContaining({
+        columnIndex: 1,
+        sourceColumn: 'Initial Contact Date',
+        targetField: 'initialOutreachAt',
+        value: Date.parse('2026-07-30T10:30:00.000Z') / 86_400_000 + 25_569,
+      }),
+      expect.objectContaining({
+        columnIndex: 2,
+        sourceColumn: 'Follow-Up Date',
+        targetField: 'followUpAt',
+      }),
+    ]);
+  });
+
+  it('adds both canonical schedule columns without overwriting neighboring headers', () => {
+    const plan = contactScheduleSheetWritePlan({
+      followUpAt: new Date('2026-08-03T17:30:00.000Z'),
+      headers: ['Contact Name', 'Email'],
+      initialOutreachAt: new Date('2026-07-30T17:30:00.000Z'),
+      mappings: [],
+    });
+
+    expect(plan.newMappings).toEqual([
+      {
+        columnIndex: 2,
+        sourceColumn: 'Initial Contact Date',
+        targetField: 'initialOutreachAt',
+      },
+      {
+        columnIndex: 3,
+        sourceColumn: 'Follow-Up Date',
+        targetField: 'followUpAt',
+      },
+    ]);
   });
 });

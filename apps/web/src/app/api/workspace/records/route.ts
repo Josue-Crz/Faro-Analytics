@@ -5,6 +5,12 @@ import type { NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { sessionFromRequest } from '@/lib/server/auth';
+import {
+  nonArchivedCampaignWorkWhere,
+  visibleInteractionCampaignWhere,
+} from '@/lib/server/campaign-visibility';
+import { refreshExpiredContactNextActions } from '@/lib/server/contact-next-action';
+import { sponsorshipPortfolioItemFromOrganization } from '@/lib/sponsorship-portfolio';
 
 const campaignSchema = z
   .object({
@@ -51,6 +57,7 @@ function categoryMetadata(customFields: unknown) {
 export async function GET(request: NextRequest) {
   const session = await sessionFromRequest(request);
   if (!session) return NextResponse.json({ error: 'AUTHENTICATION_REQUIRED' }, { status: 401 });
+  await refreshExpiredContactNextActions(session.workspaceId);
   const focusedCampaignId = session.focusedCampaignId;
   const campaignContactFilter = focusedCampaignId
     ? {
@@ -87,6 +94,8 @@ export async function GET(request: NextRequest) {
         firstName: true,
         id: true,
         lastName: true,
+        nextActionAt: true,
+        nextActionType: true,
         organization: { select: { industry: true, name: true, type: true, website: true } },
         phone: true,
         preferredChannel: true,
@@ -129,6 +138,8 @@ export async function GET(request: NextRequest) {
             firstName: true,
             id: true,
             lastName: true,
+            nextActionAt: true,
+            nextActionType: true,
             title: true,
             type: true,
           },
@@ -150,6 +161,7 @@ export async function GET(request: NextRequest) {
         id: true,
         industry: true,
         name: true,
+        sponsorshipStage: { select: { name: true } },
         type: true,
         website: true,
       },
@@ -232,13 +244,14 @@ export async function GET(request: NextRequest) {
         },
         dueAt: true,
         id: true,
+        initialAt: true,
         priority: true,
         reason: true,
         status: true,
       },
       take: 1_000,
       where: {
-        campaignId: focusedCampaignId ?? undefined,
+        ...nonArchivedCampaignWorkWhere(focusedCampaignId),
         workspaceId: session.workspaceId,
       },
     }),
@@ -255,7 +268,7 @@ export async function GET(request: NextRequest) {
       },
       take: 500,
       where: {
-        campaignId: focusedCampaignId ?? undefined,
+        ...visibleInteractionCampaignWhere(focusedCampaignId),
         channel: 'EMAIL',
         workspaceId: session.workspaceId,
       },
@@ -263,15 +276,25 @@ export async function GET(request: NextRequest) {
     prisma.bobGenerationRequest.findMany({
       orderBy: { requestedAt: 'desc' },
       select: {
+        campaignId: true,
         contactId: true,
-        draft: { select: { approvalStatus: true, bodyText: true, id: true, subject: true } },
+        draft: {
+          select: {
+            approvalStatus: true,
+            bodyText: true,
+            id: true,
+            provenance: true,
+            subject: true,
+          },
+        },
+        followUpTaskId: true,
         id: true,
         requestedAt: true,
         status: true,
       },
       take: 100,
       where: {
-        campaignId: focusedCampaignId ?? undefined,
+        ...nonArchivedCampaignWorkWhere(focusedCampaignId),
         workspaceId: session.workspaceId,
       },
     }),
@@ -313,10 +336,17 @@ export async function GET(request: NextRequest) {
             contactId: contact.id,
             contactName: `${contact.firstName} ${contact.lastName}`,
             dueAt: fields.importedFollowUpAt,
+            initialAt:
+              typeof fields.importedFollowUpInitialAt === 'string'
+                ? fields.importedFollowUpInitialAt
+                : fields.importedFollowUpAt,
           },
         ]
       : [];
   });
+  const sponsorshipPortfolio = organizations
+    .map(sponsorshipPortfolioItemFromOrganization)
+    .filter((item) => item !== null);
   return NextResponse.json({
     data: {
       campaigns,
@@ -331,6 +361,7 @@ export async function GET(request: NextRequest) {
         ...categoryMetadata(customFields),
       })),
       planningReferenceTime: new Date().toISOString(),
+      sponsorshipPortfolio,
       scope: {
         campaign: focusedCampaign ? { id: focusedCampaign.id, name: focusedCampaign.name } : null,
         kind: focusedCampaign ? 'CAMPAIGN' : 'WORKSPACE',

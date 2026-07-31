@@ -14,6 +14,8 @@ function backend(): FaroMcpBackend {
       id: 'contact-one',
       firstName: 'Avery',
       consentStatus: 'OPTED_IN',
+      nextActionAt: '2026-08-03T16:30:00.000Z',
+      nextActionType: 'FOLLOW_UP',
       suppressed: false,
     })),
     getOrganizationContext: vi.fn(async () => null),
@@ -33,6 +35,38 @@ const authorizer = () =>
   });
 
 describe('Faro MCP tool boundary', () => {
+  it('returns both required dates for each due follow-up', async () => {
+    const data = backend();
+    vi.mocked(data.getDueFollowups).mockResolvedValue([
+      {
+        campaignId: 'campaign-one',
+        contactId: 'contact-one',
+        dueAt: '2026-07-11T12:00:00.000Z',
+        id: 'follow-up-one',
+        initialAt: '2026-07-10T12:00:00.000Z',
+        priority: 'MEDIUM',
+        reason: 'A response needs review.',
+      },
+    ]);
+
+    await expect(
+      executeFaroTool(
+        'faro_get_due_followups',
+        {
+          dueBefore: '2026-07-12T12:00:00.000Z',
+          limit: 25,
+          workspaceId: 'ws-one',
+        },
+        { authorizer: authorizer(), audit: new InMemoryMcpAuditSink(), backend: data },
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        dueAt: '2026-07-11T12:00:00.000Z',
+        initialAt: '2026-07-10T12:00:00.000Z',
+      }),
+    ]);
+  });
+
   it('runs the deterministic outreach optimizer inside the authorized workspace', async () => {
     const audit = new InMemoryMcpAuditSink();
     const result = await executeFaroTool(
@@ -93,6 +127,8 @@ describe('Faro MCP tool boundary', () => {
       id: 'contact-one',
       firstName: 'Avery',
       consentStatus: 'OPTED_IN',
+      nextActionAt: '2026-08-03T16:30:00.000Z',
+      nextActionType: 'FOLLOW_UP',
       suppressed: false,
     });
     expect(audit.events).toEqual([

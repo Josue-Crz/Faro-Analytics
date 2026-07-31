@@ -1,13 +1,14 @@
 # Accessibility notes
 
-Faro targets WCAG 2.2 AA and builds on Carbon interaction patterns. The initial vertical slice uses
+Faro targets WCAG 2.2 AA and builds on Carbon interaction patterns. The current application uses
 semantic landmarks and headings, a skip link, visible focus, keyboard-operable navigation and
 queues, labeled controls, table captions, status text plus icons, responsive layouts, and
 `prefers-reduced-motion` handling. Charts include adjacent textual summaries and heatmaps expose an
 accessible description rather than relying on color alone.
 
-Playwright runs axe smoke checks for the dashboard and follow-up center. Automated checks do not
-replace manual review. Before a production release, verify at minimum:
+Playwright runs an axe smoke check against the unauthenticated follow-up shell in desktop and mobile
+projects. Automated checks do not replace manual review. Before a production release, verify at
+minimum:
 
 - keyboard order and focus return for navigation, modals, and draft actions;
 - screen-reader table navigation and dynamic status announcements;

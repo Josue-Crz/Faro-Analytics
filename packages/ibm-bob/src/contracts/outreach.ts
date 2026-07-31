@@ -46,6 +46,24 @@ export const outreachInteractionSchema = z
   })
   .strict();
 
+export const outreachFollowUpContextSchema = z
+  .object({
+    id: bobIdentifierSchema,
+    initialAt: isoInstantSchema,
+    dueAt: isoInstantSchema,
+    reason: z.string().trim().min(1).max(2_000),
+  })
+  .strict()
+  .superRefine((followUp, context) => {
+    if (new Date(followUp.initialAt).getTime() > new Date(followUp.dueAt).getTime()) {
+      context.addIssue({
+        code: 'custom',
+        message: 'The initial follow-up instant must not be after the due instant',
+        path: ['initialAt'],
+      });
+    }
+  });
+
 export const outreachDraftInputSchema = z
   .object({
     workspaceId: bobIdentifierSchema,
@@ -53,6 +71,7 @@ export const outreachDraftInputSchema = z
     campaign: outreachCampaignContextSchema,
     additionalContext: z.string().trim().max(6_000).optional(),
     interactionHistory: z.array(outreachInteractionSchema).max(20).default([]),
+    followUp: outreachFollowUpContextSchema.optional(),
     latestResponse: optionalBoundedTextSchema,
     latestResponseSourceRecordId: bobIdentifierSchema.optional(),
     selectedTone: bobToneSchema,
@@ -66,6 +85,7 @@ export const outreachDraftInputSchema = z
     const embeddedSourceIds = [
       input.contact.id,
       input.campaign.id,
+      ...(input.followUp ? [input.followUp.id] : []),
       ...input.interactionHistory.map((interaction) => interaction.id),
       ...(input.latestResponseSourceRecordId ? [input.latestResponseSourceRecordId] : []),
     ];

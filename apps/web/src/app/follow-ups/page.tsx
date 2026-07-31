@@ -283,6 +283,10 @@ function FollowUpWorkspace() {
                     {task.organization} · {task.industry} · {task.campaign}
                   </span>
                   <span className="queue-item__reason">{task.reason}</span>
+                  <span className="queue-item__reason">
+                    Initial {new Date(task.initialAt).toLocaleString()} · Follow-up{' '}
+                    {new Date(task.followUpAt).toLocaleString()}
+                  </span>
                   <span className="queue-item__footer">
                     <StatusBadge
                       label={localStatuses[task.id] ?? task.statusLabel}
@@ -367,6 +371,24 @@ function FollowUpWorkspace() {
               </span>
             </div>
             <p>{selected.reason}</p>
+            <dl className="algorithm-meta" aria-label="Follow-up dates">
+              <div>
+                <dt>Initial date</dt>
+                <dd>
+                  <time dateTime={selected.initialAt}>
+                    {new Date(selected.initialAt).toLocaleString()}
+                  </time>
+                </dd>
+              </div>
+              <div>
+                <dt>Follow-up date</dt>
+                <dd>
+                  <time dateTime={selected.followUpAt}>
+                    {new Date(selected.followUpAt).toLocaleString()}
+                  </time>
+                </dd>
+              </div>
+            </dl>
             <div className="last-response">
               <div className="last-response__meta">
                 <Email size={16} />

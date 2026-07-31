@@ -13,11 +13,11 @@ import { AppShell } from '@/components/AppShell';
 
 export const metadata: Metadata = {
   title: {
-    default: 'Faro · Outreach intelligence',
-    template: '%s · Faro',
+    default: 'Faro Analytics · Relationship intelligence',
+    template: '%s · Faro Analytics',
   },
   description:
-    'Turn outreach activity into clear signals, better timing, and more meaningful responses.',
+    'Turn governed relationship context into explainable, future-dated outreach and follow-up decisions.',
   icons: [{ rel: 'icon', url: '/favicon.svg', type: 'image/svg+xml' }],
 };
 

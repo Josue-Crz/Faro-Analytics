@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { categorizeOrganization, COMPANY_CATEGORIES } from '@faro/core';
 
+import { ContactScheduleEditor } from './ContactScheduleEditor';
 import { PageHeader } from './PageHeader';
 import { StatusBadge } from './StatusBadge';
 
@@ -45,8 +46,11 @@ interface ContactSummary {
   firstName: string;
   id: string;
   lastName: string;
+  nextActionAt: string;
+  nextActionType: string;
   organization: { industry: string; name: string } | null;
   source: string | null;
+  timezone: string;
   title: string | null;
 }
 
@@ -69,6 +73,7 @@ interface CampaignDetailData {
       contact: { firstName: string; id: string; lastName: string };
       dueAt: string;
       id: string;
+      initialAt: string;
       priority: string;
       reason: string;
       status: string;
@@ -181,6 +186,9 @@ export function ConnectedCampaignDetail({
         return (await response.json()) as { data: CampaignDetailData };
       })
       .then((result) => {
+        if (new URLSearchParams(window.location.search).get('edit') === '1') {
+          setEditingCampaign(true);
+        }
         setData(result.data);
         setEditDraft(campaignEditDraft(result.data.campaign));
         setSelectedSourceId(result.data.campaign.sheetConnectionId ?? '');
@@ -196,6 +204,20 @@ export function ConnectedCampaignDetail({
       });
     return () => controller.abort();
   }, [campaignId]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && !editingCampaign && !savingCampaignAction) {
+        void load();
+      }
+    };
+    const interval = window.setInterval(refresh, 30_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [editingCampaign, load, savingCampaignAction]);
 
   const visibleCandidates = useMemo(() => {
     const normalizedQuery = query.toLocaleLowerCase('en-US');
@@ -219,14 +241,23 @@ export function ConnectedCampaignDetail({
       headers: { 'content-type': 'application/json' },
       method: 'POST',
     });
-    if (!response.ok) {
+    const result = (await response.json().catch(() => null)) as {
+      data?: { assigned: number; scheduleIssues: Array<unknown>; scheduled: number };
+    } | null;
+    if (!response.ok || !result?.data) {
       setNotice(
         'Those contacts could not be added. They may belong to a different polled data source.',
       );
       return;
     }
     setNotice(
-      `${selectedContactIds.length} contact${selectedContactIds.length === 1 ? '' : 's'} added to this campaign workspace.`,
+      `${result.data.assigned} contact${result.data.assigned === 1 ? '' : 's'} added; ${
+        result.data.scheduled
+      } received optimizer-assigned initial and follow-up dates${
+        result.data.scheduleIssues.length
+          ? `. ${result.data.scheduleIssues.length} still need consent, Sheet access, or a safe window`
+          : ''
+      }.`,
     );
     setSelectedContactIds([]);
     await load();
@@ -428,7 +459,7 @@ export function ConnectedCampaignDetail({
           : isFocusedCampaign
             ? 'Dashboard, contacts, outreach, follow-ups, analytics, and data sources now stay scoped to this campaign until you explicitly return to the main workspace.'
             : blockedByOtherFocus
-              ? 'This campaign is view-only while another campaign is focused. Use the switch button before changing its contacts, source, or outreach.'
+              ? 'Another campaign is focused, so this campaign’s contacts, source, and outreach are view-only. You can still edit its details or delete it here.'
               : 'Opening a campaign does not change your workspace. Use the focus button to keep the entire app assigned here.'}
       </p>
       {notice ? (
@@ -451,7 +482,7 @@ export function ConnectedCampaignDetail({
               void saveCampaignDetails();
             }}
           >
-            <fieldset disabled={Boolean(savingCampaignAction) || blockedByOtherFocus}>
+            <fieldset disabled={Boolean(savingCampaignAction)}>
               <legend className="visually-hidden">Edit campaign details</legend>
               <div className="campaign-management__form">
                 <TextInput
@@ -539,7 +570,7 @@ export function ConnectedCampaignDetail({
             </dl>
             <div className="page-actions">
               <Button
-                disabled={blockedByOtherFocus || Boolean(savingCampaignAction)}
+                disabled={Boolean(savingCampaignAction)}
                 kind="secondary"
                 onClick={() => setEditingCampaign(true)}
                 renderIcon={Edit}
@@ -555,7 +586,7 @@ export function ConnectedCampaignDetail({
                 {campaignCompleted ? 'Campaign complete' : 'Complete campaign'}
               </Button>
               <Button
-                disabled={blockedByOtherFocus || Boolean(savingCampaignAction)}
+                disabled={Boolean(savingCampaignAction)}
                 kind="danger--ghost"
                 onClick={() => void deleteCampaign()}
                 renderIcon={TrashCan}
@@ -814,12 +845,30 @@ export function ConnectedCampaignDetail({
                 <div>
                   <dt>Next action</dt>
                   <dd>
-                    {membership.nextActionAt
-                      ? new Date(membership.nextActionAt).toLocaleString()
-                      : 'Not scheduled'}
+                    {contact.nextActionType.replaceAll('_', ' ').toLocaleLowerCase()} ·{' '}
+                    {new Date(contact.nextActionAt).toLocaleString()}
                   </dd>
                 </div>
               </dl>
+              {!campaignOperationsBlocked ? (
+                <ContactScheduleEditor
+                  campaigns={[campaign]}
+                  consentStatus={contact.consentStatus}
+                  contactId={contact.id}
+                  contactName={`${contact.firstName} ${contact.lastName}`}
+                  followUps={campaign.followUpTasks
+                    .filter((followUp) => followUp.contact.id === contact.id)
+                    .map((followUp) => ({
+                      ...followUp,
+                      campaign: { id: campaign.id, name: campaign.name },
+                    }))}
+                  reload={load}
+                  returnTo={`/campaigns/${encodeURIComponent(campaign.id)}`}
+                  scopeCampaignId={campaign.id}
+                  source={contact.source}
+                  timeZone={contact.timezone}
+                />
+              ) : null}
               <div className="campaign-contact-actions">
                 <Button
                   disabled={
@@ -870,13 +919,19 @@ export function ConnectedCampaignDetail({
                 {followUp.contact.firstName} {followUp.contact.lastName}
               </h3>
               <p>{followUp.reason}</p>
+              <p>
+                Initial date: {new Date(followUp.initialAt).toLocaleString()} · Follow-up date:{' '}
+                {new Date(followUp.dueAt).toLocaleString()}
+              </p>
             </div>
             <div className="list-card__meta">
               <StatusBadge
                 label={`${followUp.status} · ${followUp.priority}`}
                 status={followUp.priority === 'URGENT' ? 'issue' : 'attention'}
               />
-              <time dateTime={followUp.dueAt}>{new Date(followUp.dueAt).toLocaleString()}</time>
+              <time dateTime={followUp.dueAt}>
+                Follow-up {new Date(followUp.dueAt).toLocaleString()}
+              </time>
             </div>
           </Link>
         ))}

@@ -60,6 +60,41 @@ const TARGET_ALIASES: Record<ContactEditableField | 'fullName', readonly string[
 const googleValuesSchema = z.object({
   values: z.array(z.array(z.union([z.string(), z.number(), z.boolean()]))).default([]),
 });
+const googleSpreadsheetMetadataSchema = z.object({
+  properties: z.object({
+    timeZone: z.string().min(1),
+  }),
+  sheets: z.array(
+    z.object({
+      properties: z.object({
+        gridProperties: z.object({
+          columnCount: z.number().int().positive(),
+        }),
+        sheetId: z.number().int(),
+        title: z.string(),
+      }),
+    }),
+  ),
+});
+
+type ContactScheduleField = 'followUpAt' | 'initialOutreachAt';
+
+const SCHEDULE_TARGET_HEADERS: Record<ContactScheduleField, string> = {
+  followUpAt: 'Follow-Up Date',
+  initialOutreachAt: 'Initial Contact Date',
+};
+
+const SCHEDULE_TARGET_ALIASES: Record<ContactScheduleField, readonly string[]> = {
+  followUpAt: ['followupdate', 'followupat', 'nextfollowup', 'duedate'],
+  initialOutreachAt: [
+    'initialcontactdate',
+    'initialcontactat',
+    'initialdate',
+    'initialoutreachdate',
+    'followupinitialdate',
+    'followupstartdate',
+  ],
+};
 
 function jsonObject(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -169,6 +204,84 @@ function sheetRange(worksheetId: string, columnIndex: number, row: number): stri
   return `'${escapedTitle}'!${sheetColumnName(columnIndex)}${row}`;
 }
 
+export interface ContactScheduleSheetWritePlan {
+  cells: Array<{
+    columnIndex: number;
+    sourceColumn: string;
+    targetField: ContactScheduleField;
+    value: number;
+  }>;
+  newMappings: Array<{
+    columnIndex: number;
+    sourceColumn: string;
+    targetField: ContactScheduleField;
+  }>;
+}
+
+function googleDateTimeSerial(value: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    day: '2-digit',
+    hour: '2-digit',
+    hourCycle: 'h23',
+    hour12: false,
+    minute: '2-digit',
+    month: '2-digit',
+    second: '2-digit',
+    timeZone,
+    year: 'numeric',
+  })
+    .formatToParts(value)
+    .reduce<Record<string, number>>((result, part) => {
+      if (part.type !== 'literal') result[part.type] = Number(part.value);
+      return result;
+    }, {});
+  return (
+    Date.UTC(parts.year!, parts.month! - 1, parts.day, parts.hour, parts.minute, parts.second) /
+      86_400_000 +
+    25_569
+  );
+}
+
+export function contactScheduleSheetWritePlan(input: {
+  followUpAt: Date;
+  headers: readonly string[];
+  initialOutreachAt: Date;
+  mappings: readonly StoredMapping[];
+  timeZone?: string;
+}): ContactScheduleSheetWritePlan {
+  const headers = [...input.headers];
+  const cells: ContactScheduleSheetWritePlan['cells'] = [];
+  const newMappings: ContactScheduleSheetWritePlan['newMappings'] = [];
+  const values: Record<ContactScheduleField, Date> = {
+    followUpAt: input.followUpAt,
+    initialOutreachAt: input.initialOutreachAt,
+  };
+
+  for (const targetField of ['initialOutreachAt', 'followUpAt'] as const) {
+    const aliases = SCHEDULE_TARGET_ALIASES[targetField];
+    const directMapping = input.mappings.find((mapping) => mapping.targetField === targetField);
+    const mappedColumn = directMapping?.sourceColumn;
+    let columnIndex = mappedColumn ? headers.indexOf(mappedColumn) : -1;
+    if (columnIndex === -1) {
+      columnIndex = headers.findIndex((header) => aliases.includes(normalizedHeader(header)));
+    }
+    const sourceColumn =
+      columnIndex >= 0 ? headers[columnIndex]! : SCHEDULE_TARGET_HEADERS[targetField];
+    if (columnIndex === -1) {
+      columnIndex = headers.length;
+      headers.push(sourceColumn);
+      newMappings.push({ columnIndex, sourceColumn, targetField });
+    }
+    cells.push({
+      columnIndex,
+      sourceColumn,
+      targetField,
+      value: googleDateTimeSerial(values[targetField], input.timeZone ?? 'UTC'),
+    });
+  }
+  return { cells, newMappings };
+}
+
 export class ContactSheetWritebackError extends Error {
   constructor(
     readonly code:
@@ -186,6 +299,8 @@ export class ContactSheetWritebackError extends Error {
 export type ContactSheetWritebackResult =
   | { cellsWritten: 0; status: 'NOT_APPLICABLE' | 'NO_CHANGES' }
   | { cellsWritten: number; connectionId: string; status: 'WRITTEN' };
+
+export type ContactScheduleSheetWritebackResult = ContactSheetWritebackResult;
 
 export async function writeContactEditsToGoogleSheet(input: {
   actorUserId: string;
@@ -354,4 +469,241 @@ export async function writeContactEditsToGoogleSheet(input: {
     connectionId: connection.id,
     status: 'WRITTEN',
   };
+}
+
+export async function writeContactScheduleToGoogleSheet(input: {
+  actorUserId?: string;
+  contact: {
+    customFields: unknown;
+    source: string | null;
+  };
+  followUpAt: Date;
+  initialOutreachAt: Date;
+  workspaceId: string;
+}): Promise<ContactScheduleSheetWritebackResult> {
+  if (!input.contact.source?.startsWith('google-sheets:')) {
+    return { cellsWritten: 0, status: 'NOT_APPLICABLE' };
+  }
+  const connectionId = input.contact.source.slice('google-sheets:'.length);
+  const sourceRowValue = jsonObject(input.contact.customFields).sourceRow;
+  const sourceRow =
+    typeof sourceRowValue === 'number' && Number.isInteger(sourceRowValue) && sourceRowValue > 1
+      ? sourceRowValue
+      : null;
+  if (!sourceRow) throw new ContactSheetWritebackError('GOOGLE_SHEETS_SOURCE_ROW_MISSING');
+
+  const connection = await prisma.sheetConnection.findFirst({
+    select: {
+      credentialReference: true,
+      fieldMappings: {
+        select: { id: true, sourceColumn: true, targetField: true },
+      },
+      headerRow: true,
+      id: true,
+      spreadsheetId: true,
+      worksheetId: true,
+    },
+    where: { id: connectionId, workspaceId: input.workspaceId },
+  });
+  if (!connection) throw new ContactSheetWritebackError('SHEET_CONNECTION_NOT_FOUND');
+  const credentialOwnerId = connection.credentialReference?.replace(/^google-user:/, '');
+  if (!credentialOwnerId) {
+    throw new ContactSheetWritebackError('GOOGLE_SHEETS_WRITE_OWNER_REQUIRED');
+  }
+  if (input.actorUserId && input.actorUserId !== credentialOwnerId) {
+    throw new ContactSheetWritebackError('GOOGLE_SHEETS_WRITE_OWNER_REQUIRED');
+  }
+  const credential = await prisma.googleCredential.findUnique({
+    select: { grantedScopes: true },
+    where: { userId: credentialOwnerId },
+  });
+  const scopes = credential?.grantedScopes.split(/\s+/).filter(Boolean) ?? [];
+  if (!scopes.includes(GOOGLE_SHEETS_WRITE_SCOPE)) {
+    throw new ContactSheetWritebackError('GOOGLE_SHEETS_WRITE_SCOPE_REQUIRED');
+  }
+
+  let token: string;
+  try {
+    token = await googleAccessToken(credentialOwnerId);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : '';
+    throw new ContactSheetWritebackError(
+      code === 'GOOGLE_REAUTH_REQUIRED' ||
+        code === 'GOOGLE_NOT_CONNECTED' ||
+        code === 'GOOGLE_TOKEN_REFRESH_FAILED'
+        ? 'GOOGLE_SHEETS_WRITE_SCOPE_REQUIRED'
+        : 'GOOGLE_SHEETS_WRITE_FAILED',
+    );
+  }
+
+  const escapedWorksheetTitle = connection.worksheetId.replaceAll("'", "''");
+  const headerRange = `'${escapedWorksheetTitle}'!${connection.headerRow}:${connection.headerRow}`;
+  const [headerResponse, metadataResponse] = await Promise.all([
+    fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+        connection.spreadsheetId,
+      )}/values/${encodeURIComponent(headerRange)}?majorDimension=ROWS`,
+      {
+        cache: 'no-store',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    ),
+    fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+        connection.spreadsheetId,
+      )}?fields=properties(timeZone),sheets(properties(sheetId,title,gridProperties(columnCount)))`,
+      {
+        cache: 'no-store',
+        headers: { authorization: `Bearer ${token}` },
+      },
+    ),
+  ]);
+  if (!headerResponse.ok || !metadataResponse.ok) {
+    const status = !headerResponse.ok ? headerResponse.status : metadataResponse.status;
+    throw new ContactSheetWritebackError(
+      status === 401 || status === 403
+        ? 'GOOGLE_SHEETS_WRITE_SCOPE_REQUIRED'
+        : 'GOOGLE_SHEETS_WRITE_FAILED',
+    );
+  }
+  const headers = (googleValuesSchema.parse(await headerResponse.json()).values[0] ?? []).map(
+    String,
+  );
+  const metadata = googleSpreadsheetMetadataSchema.parse(await metadataResponse.json());
+  const sheet = metadata.sheets.find(
+    (candidate) => candidate.properties.title === connection.worksheetId,
+  );
+  if (!sheet) throw new ContactSheetWritebackError('SHEET_CONNECTION_NOT_FOUND');
+
+  const plan = contactScheduleSheetWritePlan({
+    followUpAt: input.followUpAt,
+    headers,
+    initialOutreachAt: input.initialOutreachAt,
+    mappings: connection.fieldMappings,
+    timeZone: metadata.properties.timeZone,
+  });
+  const requiredColumnCount = Math.max(...plan.cells.map((cell) => cell.columnIndex + 1));
+  const requests: Array<Record<string, unknown>> = [];
+  if (requiredColumnCount > sheet.properties.gridProperties.columnCount) {
+    requests.push({
+      appendDimension: {
+        length: requiredColumnCount - sheet.properties.gridProperties.columnCount,
+        sheetId: sheet.properties.sheetId,
+        dimension: 'COLUMNS',
+      },
+    });
+  }
+  for (const mapping of plan.newMappings) {
+    if (headers.length > 0) {
+      requests.push({
+        copyPaste: {
+          destination: {
+            endColumnIndex: mapping.columnIndex + 1,
+            endRowIndex: connection.headerRow,
+            sheetId: sheet.properties.sheetId,
+            startColumnIndex: mapping.columnIndex,
+            startRowIndex: connection.headerRow - 1,
+          },
+          pasteOrientation: 'NORMAL',
+          pasteType: 'PASTE_FORMAT',
+          source: {
+            endColumnIndex: headers.length,
+            endRowIndex: connection.headerRow,
+            sheetId: sheet.properties.sheetId,
+            startColumnIndex: headers.length - 1,
+            startRowIndex: connection.headerRow - 1,
+          },
+        },
+      });
+    }
+    requests.push({
+      updateCells: {
+        fields: 'userEnteredValue',
+        range: {
+          endColumnIndex: mapping.columnIndex + 1,
+          endRowIndex: connection.headerRow,
+          sheetId: sheet.properties.sheetId,
+          startColumnIndex: mapping.columnIndex,
+          startRowIndex: connection.headerRow - 1,
+        },
+        rows: [{ values: [{ userEnteredValue: { stringValue: mapping.sourceColumn } }] }],
+      },
+    });
+  }
+  for (const cell of plan.cells) {
+    requests.push({
+      updateCells: {
+        fields: 'userEnteredValue,userEnteredFormat.numberFormat',
+        range: {
+          endColumnIndex: cell.columnIndex + 1,
+          endRowIndex: sourceRow,
+          sheetId: sheet.properties.sheetId,
+          startColumnIndex: cell.columnIndex,
+          startRowIndex: sourceRow - 1,
+        },
+        rows: [
+          {
+            values: [
+              {
+                userEnteredFormat: {
+                  numberFormat: { pattern: 'yyyy-mm-dd hh:mm', type: 'DATE_TIME' },
+                },
+                userEnteredValue: { numberValue: cell.value },
+              },
+            ],
+          },
+        ],
+      },
+    });
+  }
+
+  const writeResponse = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
+      connection.spreadsheetId,
+    )}:batchUpdate`,
+    {
+      body: JSON.stringify({ requests }),
+      cache: 'no-store',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      method: 'POST',
+    },
+  );
+  if (!writeResponse.ok) {
+    throw new ContactSheetWritebackError(
+      writeResponse.status === 401 || writeResponse.status === 403
+        ? 'GOOGLE_SHEETS_WRITE_SCOPE_REQUIRED'
+        : 'GOOGLE_SHEETS_WRITE_FAILED',
+    );
+  }
+
+  await prisma.$transaction(async (database) => {
+    if (plan.newMappings.length) {
+      await database.sheetFieldMapping.createMany({
+        data: plan.newMappings.map((mapping) => ({
+          id: randomUUID(),
+          required: false,
+          sheetConnectionId: connection.id,
+          sourceColumn: mapping.sourceColumn,
+          targetEntity: 'ContactSchedule',
+          targetField: mapping.targetField,
+          transformation: 'NONE',
+          workspaceId: input.workspaceId,
+        })),
+        skipDuplicates: true,
+      });
+    }
+    await database.sheetConnection.update({
+      data: {
+        lastErrorAt: null,
+        lastErrorCode: null,
+        syncDirection: 'BIDIRECTIONAL',
+        writeBackEnabled: true,
+      },
+      where: { id_workspaceId: { id: connection.id, workspaceId: input.workspaceId } },
+    });
+  });
+  return { cellsWritten: plan.cells.length, connectionId: connection.id, status: 'WRITTEN' };
 }
